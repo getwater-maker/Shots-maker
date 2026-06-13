@@ -14,7 +14,7 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let win = null;
-const S = { parsed: null, scriptPath: null, outRoot: null, preset: null, ttsMgr: null, flowEng: null };
+const S = { parsed: null, scriptPath: null, outRoot: null, preset: null, ttsMgr: null, flowEng: null, abort: false };
 
 function createWindow() {
   win = new BrowserWindow({
@@ -135,6 +135,7 @@ ipcMain.handle('tts-build', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum = null, dry = false, presetName = null } = args;
   const { speed = null } = args;
+  S.abort = false;
   if (!dry) {
     S.preset = P.getPreset(presetName);
     if (!S.preset) throw new Error('프리셋을 찾을 수 없습니다.');
@@ -148,8 +149,9 @@ ipcMain.handle('tts-build', async (_e, args = {}) => {
   for (const pr of S.parsed.projects) {
     if (shortsNum && pr.shortsNum !== shortsNum) continue;
     const ttsDir = shortsDirs(S.outRoot, pr.shortsNum).tts;
+    if (S.abort) { log('⏹ 중단됨'); break; }
     if (dry) { P.fillSilent(pr, ttsDir); log(`✓ 쇼츠${pr.shortsNum} 무음 오디오`); }
-    else { await P.fillTts(pr, S.preset, S.ttsMgr, ttsDir, log); log(`✓ 쇼츠${pr.shortsNum} 음성 완료`); }
+    else { await P.fillTts(pr, S.preset, S.ttsMgr, ttsDir, log, () => S.abort); log(`✓ 쇼츠${pr.shortsNum} 음성 완료`); }
   }
   return P.toDTO(S.parsed);
 });
@@ -267,16 +269,18 @@ function pushDtoUpdate() {
 ipcMain.handle('image-build', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum = null, engine = 'genspark', styleId = null } = args;
+  S.abort = false;
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
   for (const pr of S.parsed.projects) {
     if (shortsNum && pr.shortsNum !== shortsNum) continue;
+    if (S.abort) { log('⏹ 중단됨'); break; }
     log(`🖼 쇼츠${pr.shortsNum} 이미지 생성 (${engine}${styleId ? ', 스타일=' + styleId : ''})…`);
     try {
       const mediaDir = shortsDirs(S.outRoot, pr.shortsNum).media;
       if (engine === 'flow') {
         await runFlowImages(pr, mediaDir, log, stylePrompt);
       } else {
-        await P.generateImagesGenspark(pr, mediaDir, log, () => false, stylePrompt);
+        await P.generateImagesGenspark(pr, mediaDir, log, () => S.abort, stylePrompt);
       }
       log(`✓ 쇼츠${pr.shortsNum} 이미지 완료`);
     } catch (e) {
@@ -298,13 +302,15 @@ function resolveVideoCount(raw, groupCount) {
 ipcMain.handle('video-build', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum = null, videoCount = 'random' } = args;
+  S.abort = false;
   for (const pr of S.parsed.projects) {
     if (shortsNum && pr.shortsNum !== shortsNum) continue;
+    if (S.abort) { log('⏹ 중단됨'); break; }
     const vc = resolveVideoCount(videoCount, pr.groups.length);
     log(`🎬 쇼츠${pr.shortsNum} 영상 ${vc}개 생성 (Grok)…`);
     try {
       const videoDir = shortsDirs(S.outRoot, pr.shortsNum).media; // 영상도 media-N 폴더
-      await P.generateHookVideosGrok(pr, videoDir, log, () => false, vc);
+      await P.generateHookVideosGrok(pr, videoDir, log, () => S.abort, vc);
       log(`✓ 쇼츠${pr.shortsNum} 영상 완료`);
     } catch (e) {
       log(`✗ 쇼츠${pr.shortsNum} 영상 실패: ${e.message}`);
@@ -363,6 +369,15 @@ ipcMain.handle('save-preset', (_e, args = {}) => {
   log(`채널 "${args.name}" 설정 저장`);
   return store.loadAll().map((x) => ({ name: x.name, engine: x.engine, isDefault: !!x.isDefault }));
 });
+// Gemini API 키 (secret-store, gemini 엔진 공용) — GPU 없는 PC에서 음성 생성용
+ipcMain.handle('get-gemini-key', () => {
+  try { const s = require('./tts/secret-store').get('gemini'); return (s && s.key) || ''; } catch { return ''; }
+});
+ipcMain.handle('set-gemini-key', (_e, key) => {
+  try { require('./tts/secret-store').set('gemini', { key: String(key || '').trim() }); log('Gemini API 키 저장됨'); return true; }
+  catch (e) { log('Gemini 키 저장 실패: ' + e.message); return false; }
+});
+
 ipcMain.handle('pick-file', async (_e, args = {}) => {
   const r = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: args.filters || [{ name: 'All', extensions: ['*'] }] });
   return (r.canceled || !r.filePaths[0]) ? null : r.filePaths[0];
@@ -479,17 +494,20 @@ ipcMain.handle('make-all', async (_e, args = {}) => {
     if (!ok) throw new Error(`TTS 엔진 '${preset.engine}' 미가동`);
     ttsMgr = mgr;
   }
+  S.abort = false;
   try { fs.mkdirSync(S.outRoot, { recursive: true }); } catch {}
   for (const pr of S.parsed.projects) {
     if (shortsNum && pr.shortsNum !== shortsNum) continue;
+    if (S.abort) { log('⏹ 중단됨'); break; }
     const dirs = shortsDirs(S.outRoot, pr.shortsNum);
     log(`⚡ ${pr.title} 전체 제작 시작…`);
     const audioTask = dry ? Promise.resolve().then(() => P.fillSilent(pr, dirs.tts))
-      : P.fillTts(pr, preset, ttsMgr, dirs.tts, log);
+      : P.fillTts(pr, preset, ttsMgr, dirs.tts, log, () => S.abort);
     const imgTask = (engine === 'flow') ? runFlowImages(pr, dirs.media, log, stylePrompt)
-      : P.generateImagesGenspark(pr, dirs.media, log, () => false, stylePrompt);
+      : P.generateImagesGenspark(pr, dirs.media, log, () => S.abort, stylePrompt);
     await Promise.allSettled([audioTask, imgTask]);
-    try { await P.generateHookVideosGrok(pr, dirs.media, log, () => false, resolveVideoCount(videoCount, pr.groups.length)); }
+    if (S.abort) { log('⏹ 중단됨'); break; }
+    try { await P.generateHookVideosGrok(pr, dirs.media, log, () => S.abort, resolveVideoCount(videoCount, pr.groups.length)); }
     catch (e) { log(`영상 실패: ${e.message}`); }
     let ep = preset;
     if (ep && captionStyle) ep = { ...ep, captionStyle: { ...(ep.captionStyle || {}), ...captionStyle } };
@@ -519,6 +537,35 @@ ipcMain.handle('set-title', (_e, args = {}) => {
 });
 
 // 미리보기 오디오 — 파일을 base64 data URL 로 반환 (media:// fetch 가 렌더러에서 막히는 경우 우회)
+// 작업 중단 — generate 함수들의 abortSignal 이 S.abort 를 확인
+ipcMain.handle('abort', () => { S.abort = true; log('⏹ 중단 요청 — 현재 단계 마치는 대로 멈춥니다'); });
+
+// 초기화 — 새 대본 작업을 위해 현재 상태 비움
+ipcMain.handle('reset-project', () => {
+  S.parsed = null; S.scriptPath = null; S.outRoot = null; S.preset = null; S.abort = false;
+  log('🆕 초기화 — 새 대본을 여세요');
+  return true;
+});
+
+// 빈(또는 특정) 그룹 1개만 이미지 재생성 (Genspark 단일)
+ipcMain.handle('regen-group', async (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const { shortsNum, groupNum, styleId = null } = args;
+  const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
+  const g = pr && pr.groups.find((x) => x.num === groupNum);
+  if (!g) return P.toDTO(S.parsed);
+  if (!g.imagePrompt || !g.imagePrompt.trim()) { log(`G${groupNum}: 이미지 프롬프트 없음`); return P.toDTO(S.parsed); }
+  S.abort = false;
+  const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
+  const mediaDir = shortsDirs(S.outRoot, shortsNum).media;
+  log(`🔄 쇼츠${shortsNum} G${groupNum} 이미지 재생성 (Genspark)…`);
+  try {
+    await P.generateImagesGenspark(pr, mediaDir, log, () => S.abort, stylePrompt, [groupNum]);
+    log(`✓ G${groupNum} 재생성 완료`);
+  } catch (e) { log(`✗ G${groupNum} 재생성 실패: ${e.message}`); }
+  return P.toDTO(S.parsed);
+});
+
 ipcMain.handle('set-aspect', (_e, value) => {
   if (!S.parsed) return null;
   const a = (value === '1:1') ? '1:1' : '9:16';

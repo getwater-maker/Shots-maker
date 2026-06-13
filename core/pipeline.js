@@ -90,9 +90,10 @@ async function makeTtsManager(logger, engine) {
 }
 
 // ── 오디오 채우기 ───────────────────────────────────────
-async function fillTts(project, preset, ttsMgr, workDir, onLine) {
+async function fillTts(project, preset, ttsMgr, workDir, onLine, abortSignal) {
   fs.mkdirSync(workDir, { recursive: true });
   for (const s of project.sentences) {
+    if (abortSignal && abortSignal()) { if (onLine) onLine('⏹ TTS 중단'); break; }
     const out = path.join(workDir, `${s.num}.wav`);
     const res = await ttsMgr.synthesize(s.text, {
       provider: preset.engine,
@@ -170,10 +171,11 @@ async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxCha
 
 // ── 이미지 생성 ─────────────────────────────────────────
 // group.imagePrompt 를 "그대로" 투입. 컷 num → cut{num}.png. 결과를 group.imagePath 에 매핑.
-async function generateImagesGenspark(project, imagesDir, logger, abortSignal, stylePrompt) {
+async function generateImagesGenspark(project, imagesDir, logger, abortSignal, stylePrompt, onlyNums) {
   fs.mkdirSync(imagesDir, { recursive: true });
   const groups = project.groups;
-  const idx = groups.map((g, i) => i).filter((i) => groups[i].imagePrompt && groups[i].imagePrompt.trim());
+  const idx = groups.map((g, i) => i).filter((i) => groups[i].imagePrompt && groups[i].imagePrompt.trim()
+    && (!onlyNums || onlyNums.includes(groups[i].num)));
   if (!idx.length) { (logger || (() => {}))('이미지 프롬프트가 있는 컷이 없음'); return []; }
 
   const log = logger || (() => {});

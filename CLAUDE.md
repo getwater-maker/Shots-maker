@@ -71,6 +71,10 @@ npm start     # → electron .
 - 도형 가로 = **영상 전체 폭(width 1)**, 세로만 텍스트 크기 따라 가변.
 - 비GPU PC: TTS 멀티엔진(OmniVoice 원격GPU / **Gemini API** / **Supertonic 로컬CPU 9882**) 이미 포함 →
   채널 engine을 gemini/supertonic으로 하면 GPU 없이 동작(PrimingFlow 구조 그대로).
+  **Gemini API 키 입력**: ⚙ 채널편집 모달의 'Gemini 키' → IPC get/set-gemini-key → `tts/secret-store`('gemini'.key).
+  gemini-provider.init()이 그 키를 읽음. 비GPU PC는 gemini 채널 선택 + 키 입력하면 음성 생성.
+- 패키징: `npx electron-builder --win nsis --x64 --publish never` → dist/Shots-maker Setup 0.1.0.exe(+latest.yml).
+  자동업데이트는 그 둘을 GitHub Releases에 올리면 동작(토큰 없이 드래그업로드 가능). repo: getwater-maker/Shots-maker(푸시됨).
 - GitHub 자동업데이트: main에 `electron-updater` `checkForUpdatesAndNotify`(패키징 시만), package.json
   `build.publish`(github getwater-maker/Shots-maker) + `npm run dist`. 발행은 repo 생성 + GH_TOKEN 필요(수동).
 
@@ -196,6 +200,9 @@ npm start     # → electron .
   카드 제목영역에 도형 컨트롤(채우기/테두리/모서리/점선), project.bg* 필드, set-title/DTO/save 포함. 검증: shape+Svg+1:1 OK.
 - 이미지/영상 비율: 헤더 `#aspectSel`(9:16 기본/1:1) → IPC set-aspect로 전 프로젝트 aspect 설정.
   Genspark/Flow/Grok `_aspectRatio=project.aspect`, vrew-builder 1:1(캔버스 1080×1080, ratio 1.0) 지원.
+- **이미지 비율 불일치 시 중앙 배치**: vrew-builder `readImageSize`(PNG/JPEG 헤더)로 실제 비율 측정 →
+  캔버스와 다르면(예: 1:1 이미지를 9:16에) **늘리지 않고 contain 중앙 배치(fillType 'fit', 켄번스 없음)**.
+  비슷하면 기존처럼 꽉채움+켄번스. 검증: 1024² → width1/height0.563/yPos0.219 OK.
 - 일괄첨부(IPC bulk-attach): 폴더 선택 → 파일명 앞 숫자=그룹번호 매핑, 같은 번호면 **영상 우선**.
 - 채널 편집(⚙): 속도·참조음성·참조텍스트·**출력폴더·대본폴더**·이미지스타일·시드·AI고지 (save-preset).
 - 대본 열기: 선택 채널의 `scriptFolder`가 dialog 기본 경로(open-script에 presetName 전달). 출력경로도 그 채널 outputFolder 기준.

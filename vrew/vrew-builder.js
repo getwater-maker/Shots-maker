@@ -141,6 +141,27 @@ const LOGO_SIZE_PRESETS = {
 // mp4 헤더(moov/trak/tkhd/mvhd) 직접 파싱 — width/height/duration 추출.
 // grok-store 추정값(1280x720) 이 실제 영상(예: 1280x704) 과 어긋나면 Vrew 가
 // 메타와 실제 frame 차이만큼 흰 letterbox 띠를 그리므로 정확한 값이 필요.
+// 이미지 실제 픽셀 크기 (PNG/JPEG 헤더 파싱, 의존성 없음). 실패 시 null.
+function readImageSize(p) {
+  try {
+    const b = fs.readFileSync(p);
+    if (b.length > 24 && b[0] === 0x89 && b[1] === 0x50) return { w: b.readUInt32BE(16), h: b.readUInt32BE(20) }; // PNG
+    if (b[0] === 0xFF && b[1] === 0xD8) { // JPEG
+      let i = 2;
+      while (i < b.length - 9) {
+        if (b[i] !== 0xFF) { i++; continue; }
+        let m = b[i + 1];
+        while (m === 0xFF && i + 1 < b.length) { i++; m = b[i + 1]; }
+        if ((m >= 0xC0 && m <= 0xC3) || (m >= 0xC5 && m <= 0xC7) || (m >= 0xC9 && m <= 0xCB) || (m >= 0xCD && m <= 0xCF)) {
+          return { h: b.readUInt16BE(i + 5), w: b.readUInt16BE(i + 7) };
+        }
+        const len = b.readUInt16BE(i + 2); i += 2 + len;
+      }
+    }
+    return null;
+  } catch { return null; }
+}
+
 function readMp4VideoMeta(filePath) {
   let fd;
   try {
@@ -863,17 +884,41 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       isTransparent: false, fileLocation: 'IN_MEMORY',
     });
 
-    // 의사 난수 인덱스 — 인접 그룹이 같은 패턴/방향성 안 가지도록 분산
-    const kb = KEN_BURNS_PATTERNS[_pickKenBurnsIndex(groupIdx)];
-    pj.props.tracks[tid] = {
-      trackId: tid, mediaId: mid,
-      xPos: _aspect === '16:9' ? -0.004 : 0, yPos: 0, height: 1, width: _aspect === '16:9' ? 1.008 : 1,
-      rotation: 0, zIndex: groupIdx, type: 'image',
-      originalWidthHeightRatio: _frameRatio,
-      kenburnsAnimationInfo: { type: 'custom', from: { ...kb.from }, to: { ...kb.to } },
-      editInfo: {},
-      stats: { fillType: 'cut', fillMenu: 'floating', rearrangeCount: 0 },
-    };
+    // 이미지 실제 비율 확인 — 캔버스와 다르면(예: 1:1 이미지를 9:16 쇼츠에) 늘리지 않고
+    // 비율 유지한 채 상하좌우 가운데 배치(레터박스). 비슷하면 기존처럼 꽉 채움(켄번스).
+    const isz = readImageSize(g.imagePath);
+    const imgRatio = (isz && isz.w > 0 && isz.h > 0) ? (isz.w / isz.h) : _frameRatio;
+    const mismatch = Math.abs(imgRatio - _frameRatio) > 0.06;
+    let track;
+    if (mismatch) {
+      // contain: 캔버스 안에 비율 유지로 맞춤 + 가운데. 그 박스 안에서 켄번스 적용(레터박스 유지).
+      const scale = Math.min(_canvasW / isz.w, _canvasH / isz.h);
+      const wF = (isz.w * scale) / _canvasW;
+      const hF = (isz.h * scale) / _canvasH;
+      const kb = KEN_BURNS_PATTERNS[_pickKenBurnsIndex(groupIdx)];
+      track = {
+        trackId: tid, mediaId: mid,
+        xPos: (1 - wF) / 2, yPos: (1 - hF) / 2, height: hF, width: wF,
+        rotation: 0, zIndex: groupIdx, type: 'image',
+        originalWidthHeightRatio: imgRatio,
+        kenburnsAnimationInfo: { type: 'custom', from: { ...kb.from }, to: { ...kb.to } },
+        editInfo: {},
+        stats: { fillType: 'cut', fillMenu: 'floating', rearrangeCount: 0 },
+      };
+      log(`[Vrew] 그룹${g.num} 이미지 ${isz.w}x${isz.h}(비율${imgRatio.toFixed(2)}) — 가운데 비율유지 + 켄번스`);
+    } else {
+      const kb = KEN_BURNS_PATTERNS[_pickKenBurnsIndex(groupIdx)];
+      track = {
+        trackId: tid, mediaId: mid,
+        xPos: _aspect === '16:9' ? -0.004 : 0, yPos: 0, height: 1, width: _aspect === '16:9' ? 1.008 : 1,
+        rotation: 0, zIndex: groupIdx, type: 'image',
+        originalWidthHeightRatio: _frameRatio,
+        kenburnsAnimationInfo: { type: 'custom', from: { ...kb.from }, to: { ...kb.to } },
+        editInfo: {},
+        stats: { fillType: 'cut', fillMenu: 'floating', rearrangeCount: 0 },
+      };
+    }
+    pj.props.tracks[tid] = track;
     pj.props.assets[aid] = { trackIds: [tid], role: 'sub' };
     groupImageAsset.set(g.id, { aid, mid, fn });
     mediaZip.push({ src: g.imagePath, name: fn });

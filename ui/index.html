@@ -57,7 +57,7 @@
   .cuts-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px 16px}
   /* 컷 = 썸네일(3배) + 문장 */
   .cut{display:grid;grid-template-columns:150px 1fr;gap:12px;padding:10px 0;border-top:1px dashed var(--line);align-items:start}
-  .thumb{width:150px;height:264px;border-radius:9px;object-fit:cover;background:#efe7da;border:1px solid var(--line);
+  .thumb{width:150px;height:264px;border-radius:9px;object-fit:contain;background:#1a1714;border:1px solid var(--line);
     cursor:pointer;display:block}
   .thumb.none{display:flex;align-items:center;justify-content:center;color:#c3b6a4;font-size:40px;cursor:default}
   .thumbwrap{position:relative;width:150px;height:264px}
@@ -109,7 +109,7 @@
   #stage{position:relative;width:min(42vh,92vw);aspect-ratio:9/16;background:#000;border-radius:12px;
     overflow:hidden;box-shadow:0 10px 50px rgba(0,0,0,.6)}
   #stageVisual{width:100%;height:100%}
-  #stageVisual img,#stageVisual video{width:100%;height:100%;object-fit:cover;display:block}
+  #stageVisual img,#stageVisual video{width:100%;height:100%;object-fit:contain;display:block;background:#000}
   @keyframes kenburns{from{transform:scale(1.0)}to{transform:scale(1.18) translate(1.5%,-2%)}}
   #stageVisual img.kb{animation:kenburns 7s ease-out forwards;transform-origin:center}
   #stageTitle{position:absolute;left:0;right:0;top:4%;text-align:center;font-weight:800;padding:0 5%;line-height:1.3;
@@ -142,6 +142,7 @@
     <button id="open">📂 대본 열기</button>
     <button id="saveProj" class="ghost" disabled title="이 대본 작업상태 저장">💾 프로젝트</button>
     <button id="loadProj" class="ghost" title="저장한 프로젝트 불러오기">📂 불러오기</button>
+    <button id="resetBtn" class="ghost" title="새 대본 작업 — 현재 화면 비우기">🆕 초기화</button>
     <span class="grow"></span>
     <select id="styleSel" title="이미지 스타일 (생성 시 프롬프트에 추가)"></select>
     <select id="imgEngine" title="이미지 생성툴">
@@ -158,6 +159,7 @@
     <span title="만들 영상 개수(앞 그룹부터). 랜덤=쇼츠마다 무작위">🎬<select id="videoCount" style="width:62px"><option value="random" selected>랜덤</option><option>0</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></span>
     <button id="vidAll" class="ghost" disabled title="앞에서 N개 그룹을 Grok으로 영상화">영상</button>
     <button id="makeAll" disabled title="TTS+이미지 동시 → 영상 → .vrew → 폴더열기">⚡ 만들기</button>
+    <button id="abortBtn" class="ghost" title="진행 중인 작업 중단">■ 중단</button>
     <button id="vrewAll" disabled>💾 .vrew</button>
     <button id="openOut" class="ghost" disabled>📁 출력폴더</button>
   </div>
@@ -210,6 +212,7 @@
   <div class="frow"><label>대본 폴더</label><input id="chScript" placeholder="대본 열기 기본 폴더"><button id="chScriptPick" class="ghost" style="flex:0 0 auto">찾기</button></div>
   <div class="frow"><label>이미지 스타일</label><select id="chStyle" style="flex:1;padding:6px"></select></div>
   <div class="frow"><label>시드</label><input id="chSeed" type="number"></div>
+  <div class="frow"><label>Gemini 키</label><input id="chGemini" placeholder="제미나이 음성용 API 키 (GPU 없는 PC에서 사용 · gemini 엔진 공용)"></div>
   <div class="frow chk"><label>AI 고지</label><input id="chAiNotice" type="checkbox" style="flex:0 0 auto;width:auto"> <span class="meta">영상에 "AI 제작" 자막 표시</span></div>
   <div class="mbtns"><button id="chSave">저장</button><button id="chCancel" class="ghost">취소</button></div>
 </div></div>
@@ -304,6 +307,7 @@ function renderCards(){
       const ph = phaseBadge(c.phase);
       const gd = c.groupDurationSec ? `<span class="dur">▶ ${c.groupDurationSec.toFixed(1)}s</span>` : '';
       const pv = `<button class="gprev" data-prevgroup="${pr.shortsNum}_${c.num}" title="이 그룹만 미리보기">▶</button>`;
+      const rg = `<button class="gprev" data-regen="${pr.shortsNum}_${c.num}" title="이 그룹 이미지 다시 만들기(Genspark)">🔄</button>`;
       // 썸네일 (영상 우선)
       const tag = `${pr.shortsNum}_${c.num}`;
       const clearBtn = `<button class="thumbx" data-clear="${tag}" title="첨부 삭제">✕</button>`;
@@ -317,7 +321,7 @@ function renderCards(){
         return lines.map((t)=>`<div class="sent"><span class="lineno">${String(++capN).padStart(2,'0')} |</span>${(t||'').replace(/</g,'&lt;')}</div>`).join('');
       }).join('');
       return `<div class="cut">${thumb}<div>
-        <div class="narr"><span class="num">G${c.num}</span><span class="badge ${ph[0]}">${ph[1]}</span><span class="rightgrp">${gd}${pv}</span></div>
+        <div class="narr"><span class="num">G${c.num}</span><span class="badge ${ph[0]}">${ph[1]}</span><span class="rightgrp">${gd}${rg}${pv}</span></div>
         <div class="sents">${sents}</div>
       </div></div>`;
     }).join('');
@@ -366,6 +370,7 @@ function renderCards(){
   wrap.querySelectorAll('[data-bulk]').forEach(b=> b.onclick=()=>runBulk(+b.dataset.bulk));
   wrap.querySelectorAll('[data-prevshorts]').forEach(b=> b.onclick=()=>playShorts(+b.dataset.prevshorts));
   wrap.querySelectorAll('[data-prevgroup]').forEach(b=> b.onclick=()=>{ const [s,g]=b.dataset.prevgroup.split('_').map(Number); playGroup(s,g); });
+  wrap.querySelectorAll('[data-regen]').forEach(b=> b.onclick=()=>{ const [s,g]=b.dataset.regen.split('_').map(Number); runRegen(s,g); });
   wrap.querySelectorAll('[data-make]').forEach(b=> b.onclick=()=>runMake(+b.dataset.make));
   wrap.querySelectorAll('[data-vrew]').forEach(b=> b.onclick=()=>runVrew(+b.dataset.vrew));
   wrap.querySelectorAll('[data-attach]').forEach(el=> el.onclick=()=>attachAsset(el.dataset.attach));
@@ -404,6 +409,11 @@ async function attachAsset(tag){
 async function clearAsset(shortsNum, groupNum){
   try{ DTO = await window.api.clearAsset({ shortsNum, groupNum }); renderCards(); setStatus('자산 삭제'); }
   catch(e){ logline('오류: '+e.message); }
+}
+async function runRegen(shortsNum, groupNum){
+  setStatus(`G${groupNum} 이미지 재생성…`);
+  try{ DTO = await window.api.regenGroup({ shortsNum, groupNum, styleId: $('#styleSel').value||null }); renderCards(); setStatus('재생성 완료'); }
+  catch(e){ logline('오류: '+e.message); setStatus('오류'); }
 }
 
 // ── 미리보기 재생 플레이어 (이미지/영상 + 음성 + 자막을 순서대로) ──
@@ -524,6 +534,7 @@ $('#editPreset').onclick = async ()=>{
   for(const s of styles){ const o=document.createElement('option'); o.value=s.id; o.textContent=s.name; cs.appendChild(o); }
   cs.value=p.styleId||'';
   $('#chSeed').value=(p.seed!=null?p.seed:'');
+  try{ $('#chGemini').value = await window.api.getGeminiKey(); }catch{}
   $('#chAiNotice').checked=!!(p.aiNotice&&p.aiNotice.enabled);
   $('#chmodal').classList.add('show');
 };
@@ -550,6 +561,7 @@ $('#chSave').onclick = async ()=>{
   if(seedV!=='') patch.seed = parseInt(seedV,10);
   try{
     await window.api.savePreset({ name:_editPreset.name, patch });
+    try{ await window.api.setGeminiKey($('#chGemini').value); }catch{}
     await loadPresets();
     $('#preset').value=_editPreset.name;
     await loadStyles();
@@ -571,8 +583,7 @@ async function loadStyles(){
   const sel = $('#styleSel'); sel.innerHTML='';
   const none=document.createElement('option'); none.value=''; none.textContent='스타일 없음'; sel.appendChild(none);
   for(const s of styles){ const o=document.createElement('option'); o.value=s.id; o.textContent=s.name; sel.appendChild(o); }
-  // 기본값 = 기본 채널의 styleId
-  try{ const def = await window.api.getPresetDetail($('#preset').value); if(def && def.styleId) sel.value=def.styleId; }catch{}
+  sel.value = 'chibi'; // 기본값 = 치비(귀여운). 사용자가 임의 변경 가능.
 }
 
 $('#open').onclick = async ()=>{
@@ -620,6 +631,13 @@ $('#vidAll').onclick = ()=> runVid(null);
 $('#makeAll').onclick = ()=> runMake(null);
 $('#vrewAll').onclick = ()=> runVrew(null);
 $('#openOut').onclick = ()=> window.api.openFolder();
+$('#abortBtn').onclick = ()=>{ window.api.abort(); setStatus('중단 요청됨'); };
+$('#resetBtn').onclick = async ()=>{
+  await window.api.resetProject();
+  DTO=null; renderCards(); $('#ftitle').textContent=''; $('#ftitle').title='';
+  $('#ttsAll').disabled=$('#imgAll').disabled=$('#vidAll').disabled=$('#prevAllBtn').disabled=$('#makeAll').disabled=$('#vrewAll').disabled=$('#openOut').disabled=$('#saveProj').disabled=true;
+  setStatus('초기화됨 — 새 대본을 여세요');
+};
 $('#aspectSel').onchange = async ()=>{ try{ const d=await window.api.setAspect($('#aspectSel').value); if(d){ DTO=d; renderCards(); } setStatus('비율 '+$('#aspectSel').value); }catch(e){ logline('오류: '+e.message); } };
 $('#saveProj').onclick = async ()=>{ try{ const r=await window.api.saveProject(); setStatus('프로젝트 저장됨'); logline('저장: '+r.file); }catch(e){ logline('오류: '+e.message); } };
 $('#loadProj').onclick = async ()=>{ const r=await window.api.loadProject(); if(!r) return; DTO=r.dto; renderCards(); $('#ftitle').textContent=r.dto.fileTitle;
