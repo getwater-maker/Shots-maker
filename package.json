@@ -1,0 +1,52 @@
+{
+  "name": "shots-maker",
+  "productName": "Shots-maker",
+  "version": "0.1.0",
+  "description": "역사이야기 컷 단위 쇼츠 대본(.md) → 편별 Vrew(.vrew)/MP4 자동 제작 (PrimingFlow 엔진 재활용 클론)",
+  "main": "bootstrap.js",
+  "scripts": {
+    "start": "electron .",
+    "test:parser": "node test/parser.test.js",
+    "build:shorts": "node build-shorts.js",
+    "dist": "electron-builder --win nsis --x64 --publish always"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.17",
+    "electron-updater": "^6.8.3",
+    "ffmpeg-static": "^5.3.0",
+    "playwright": "^1.60.0",
+    "wavesurfer.js": "^7.8.6"
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.user.shotsmaker",
+    "productName": "Shots-maker",
+    "asar": true,
+    "asarUnpack": [
+      "tts/omnivoice-backend/**",
+      "node_modules/ffmpeg-static/**",
+      "assets/fonts/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "getwater-maker",
+        "repo": "Shots-maker",
+        "releaseType": "release"
+      }
+    ]
+  }
+}
