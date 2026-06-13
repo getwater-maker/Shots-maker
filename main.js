@@ -69,14 +69,7 @@ app.whenReady().then(() => {
   });
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
-  // GitHub 릴리스 자동 업데이트 (패키징된 앱에서만 동작, 개발 중엔 무시)
-  try {
-    const { autoUpdater } = require('electron-updater');
-    autoUpdater.autoDownload = true;
-    autoUpdater.on('update-downloaded', () => log('업데이트 다운로드 완료 — 앱 재시작 시 적용됩니다.'));
-    autoUpdater.on('error', () => {});
-    autoUpdater.checkForUpdatesAndNotify().catch(() => {});
-  } catch (e) { /* 개발 모드 */ }
+  // 자동 업데이트는 bootstrap.js 의 auto-updater 모듈이 담당 (PrimingFlow 방식)
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('before-quit', () => {

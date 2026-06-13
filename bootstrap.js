@@ -13,3 +13,10 @@ try {
 } catch (_) {}
 
 require('./main.js');
+
+// 자동 업데이트 체크 등록 (패키징된 앱에서만 동작 — main.js 의 app.whenReady 처리 후 5초 뒤)
+try {
+  require('./auto-updater').setupAutoUpdater();
+} catch (err) {
+  process.stderr.write(`[auto-updater] setup failed: ${err && err.stack ? err.stack : err}\n`);
+}
