@@ -20,6 +20,7 @@ function createWindow() {
   win = new BrowserWindow({
     width: 1240, height: 860,
     title: 'Shots-maker',
+    icon: path.join(__dirname, 'assets', 'icon.ico'),
     backgroundColor: '#faf6f0',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
