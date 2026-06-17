@@ -313,11 +313,32 @@ function pushDtoUpdate() {
   try { if (win && !win.isDestroyed() && S.parsed) win.webContents.send('dto-update', P.toDTO(S.parsed)); } catch {}
 }
 
+// 프롬프트 없는 그룹(prose 대본 등) → 이미지 생성 전에 Gemini API 로 내용 맞는 영어 프롬프트 자동 생성.
+// 키 없으면 경고만(나레이션 폴백). 이미 프롬프트 있으면 아무것도 안 함.
+async function autoFillPrompts(projects, logger) {
+  const need = projects.some((pr) => pr.groups.some((g) => !g.imagePrompt || !g.imagePrompt.trim()));
+  if (!need) return;
+  let key = '';
+  try { key = (require('./tts/secret-store').get('gemini') || {}).key || ''; } catch {}
+  if (!key.trim()) { logger('⚠ 프롬프트 없는 그룹이 있으나 Gemini 키 없음 — ⚙채널편집에서 키 입력 권장. 지금은 나레이션으로 진행됩니다.'); return; }
+  try {
+    const PromptIO = require('./core/prompt-io');
+    logger('🤖 프롬프트 없는 그룹 — Gemini API로 내용 맞는 프롬프트 자동 생성 중…');
+    const reqText = PromptIO.buildPromptRequestText(projects, {});
+    const answer = await PromptIO.callLlmTextApi('gemini', key, reqText);
+    const r = PromptIO.applyPromptsToProjects(projects, answer);
+    logger(`📥 프롬프트 자동 생성 완료 — ${r.groups}개 그룹 (🖼${r.img}·🎬${r.vid})`);
+    pushDtoUpdate();
+  } catch (e) { logger('프롬프트 자동 생성 실패: ' + e.message + ' (나레이션으로 진행)'); }
+}
+
 ipcMain.handle('image-build', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum = null, engine = 'genspark', styleId = null } = args;
   S.abort = false;
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
+  // 프롬프트 없는 그룹 → API로 자동 생성 (내용 맞는 이미지)
+  await autoFillPrompts(S.parsed.projects.filter((p) => !shortsNum || p.shortsNum === shortsNum), log);
   for (const pr of S.parsed.projects) {
     if (shortsNum && pr.shortsNum !== shortsNum) continue;
     if (S.abort) { log('⏹ 중단됨'); break; }
@@ -550,6 +571,8 @@ ipcMain.handle('make-all', async (_e, args = {}) => {
   }
   S.abort = false;
   try { fs.mkdirSync(S.outRoot, { recursive: true }); } catch {}
+  // 프롬프트 없는 그룹(prose 대본) → 이미지 전에 API로 자동 생성 (내용 맞는 이미지)
+  if (!dry) { await autoFillPrompts(S.parsed.projects.filter((p) => !shortsNum || p.shortsNum === shortsNum), log); }
   for (const pr of S.parsed.projects) {
     if (shortsNum && pr.shortsNum !== shortsNum) continue;
     if (S.abort) { log('⏹ 중단됨'); break; }
