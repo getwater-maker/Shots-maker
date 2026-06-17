@@ -127,13 +127,12 @@ function ensureDirs(outRoot) {
 
 ipcMain.handle('tts-build', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { shortsNum = null, dry = false, presetName = null } = args;
+  const { shortsNum = null, dry = false, presetName = null, speed = 1.15 } = args;
   S.abort = false;
   if (!dry) {
     S.preset = P.getPreset(presetName);
     if (!S.preset) throw new Error('프리셋을 찾을 수 없습니다.');
-    // TTS 는 항상 정속(1.0)으로 합성 — 속도 조절은 Vrew 배속(playbackRate)에서 처리
-    log(`프리셋 "${S.preset.name}" (${S.preset.engine}, TTS 정속) 연결 중…`);
+    log(`프리셋 "${S.preset.name}" (${S.preset.engine}, 음성 배속 ${speed}x) 연결 중…`);
     const { mgr, ok } = await P.makeTtsManager(log, S.preset.engine);
     if (!ok) throw new Error(`TTS 엔진 '${S.preset.engine}' 미가동 (백엔드 확인)`);
     S.ttsMgr = mgr;
@@ -144,7 +143,7 @@ ipcMain.handle('tts-build', async (_e, args = {}) => {
     const ttsDir = shortsDirs(S.outRoot, pr.shortsNum).tts;
     if (S.abort) { log('⏹ 중단됨'); break; }
     if (dry) { P.fillSilent(pr, ttsDir); log(`✓ 쇼츠${pr.shortsNum} 무음 오디오`); }
-    else { await P.fillTts(pr, S.preset, S.ttsMgr, ttsDir, log, () => S.abort); log(`✓ 쇼츠${pr.shortsNum} 음성 완료`); }
+    else { await P.fillTts(pr, S.preset, S.ttsMgr, ttsDir, log, () => S.abort, speed); log(`✓ 쇼츠${pr.shortsNum} 음성 완료`); }
     // 음성변환 직후: 문장 기준 8.0초 미만 단위로 그룹 자동 재구성
     const m = P.mergeGroupsByTts(pr, 8.0);
     log(`  ↳ 8초 미만 단위로 그룹 재구성: ${m.before} → ${m.after}개`);
@@ -155,7 +154,7 @@ ipcMain.handle('tts-build', async (_e, args = {}) => {
 
 ipcMain.handle('export-vrew', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { shortsNum = null, presetName = null, captionStyle = null, captionMaxChars = 7, speed = null } = args;
+  const { shortsNum = null, presetName = null, captionStyle = null, captionMaxChars = 7 } = args;
   try { fs.mkdirSync(S.outRoot, { recursive: true }); } catch {}
   let preset = S.preset || P.getPreset(presetName);
   if (preset && captionStyle) {
@@ -167,7 +166,7 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
     const dirs = shortsDirs(S.outRoot, pr.shortsNum);
     const vrewPath = path.join(S.outRoot, `쇼츠${pr.shortsNum}.vrew`);
     try {
-      const res = await P.buildProjectVrew(pr, vrewPath, preset, log, captionMaxChars, speed);
+      const res = await P.buildProjectVrew(pr, vrewPath, preset, log, captionMaxChars); // 배속은 음성에 이미 반영
       P.writeSrt(pr, path.join(dirs.subtitles, `쇼츠${pr.shortsNum}.srt`), captionMaxChars);
       outs.push({ shortsNum: pr.shortsNum, vrewPath, clipCount: res.clipCount, imageCount: res.imageCount });
       log(`✓ 쇼츠${pr.shortsNum}.vrew (clip ${res.clipCount}, image ${res.imageCount})`);
@@ -557,7 +556,7 @@ ipcMain.handle('make-all', async (_e, args = {}) => {
     const dirs = shortsDirs(S.outRoot, pr.shortsNum);
     log(`⚡ ${pr.title} 전체 제작 시작…`);
     const audioTask = dry ? Promise.resolve().then(() => P.fillSilent(pr, dirs.tts))
-      : P.fillTts(pr, preset, ttsMgr, dirs.tts, log, () => S.abort);
+      : P.fillTts(pr, preset, ttsMgr, dirs.tts, log, () => S.abort, speed);
     const imgTask = (engine === 'flow') ? runFlowImages(pr, dirs.media, log, stylePrompt)
       : P.generateImagesGenspark(pr, dirs.media, log, () => S.abort, stylePrompt, null, pushDtoUpdate);
     await Promise.allSettled([audioTask, imgTask]);
@@ -572,7 +571,7 @@ ipcMain.handle('make-all', async (_e, args = {}) => {
     if (ep && captionStyle) ep = { ...ep, captionStyle: { ...(ep.captionStyle || {}), ...captionStyle } };
     const vrewPath = path.join(S.outRoot, `쇼츠${pr.shortsNum}.vrew`);
     try {
-      const res = await P.buildProjectVrew(pr, vrewPath, ep, log, captionMaxChars, speed);
+      const res = await P.buildProjectVrew(pr, vrewPath, ep, log, captionMaxChars); // 배속은 음성에 이미 반영
       P.writeSrt(pr, path.join(dirs.subtitles, `쇼츠${pr.shortsNum}.srt`), captionMaxChars);
       log(`✓ ${pr.title}.vrew (clip ${res.clipCount})`);
       shell.openPath(vrewPath);

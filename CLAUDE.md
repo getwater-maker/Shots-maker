@@ -28,10 +28,11 @@
 - **이미지 프롬프트 내보내기/가져오기/API**(`core/prompt-io.js`, IPC export-prompts/import-prompts/
   generate-prompts-api, UI 📤내보내기·📥가져오기+모달): PrimingFlow 포팅. 편-그룹 복합 라벨 `## [쇼츠-그룹]`로
   3편 한 번에. 안전치환(PROMPT_SAFE_RULES) 포함. API는 secret-store 키(gemini/claude/openai).
-- **속도 → Vrew 배속(기본 1.15) + TTS 정속**(v0.1.6): 사용자 .vrew 역공학 결과 — `words[].playbackRate`
-  에만 배속(type 0·2 모두), duration/originalDuration 은 자연값 유지, `ttsClip` 트랙은 playbackRate 1.
-  fillTts 합성 speed=1.0 고정, capbar '속도'→'Vrew배속'(기본 1.15), export-vrew/make-all 의 speed →
-  buildProjectVrew(playbackRate) → buildVrew opts.playbackRate. 검증: word 1.15 / ttsClip 1 일치.
+- **음성 배속을 MP3 에 직접 굽기 (Vrew 배속 폐기)**(v0.1.10): Vrew playbackRate 방식은 폐기.
+  대신 `fillTts` 가 정속 WAV 합성 → ffmpeg `atempo=배속(기본1.15)` 로 **배속 MP3** 생성(피치 유지),
+  `ttsDurationSec = 원본/배속`. 8초 그룹·.vrew 모두 이 배속 MP3 사용. vrew-builder `_playbackRate` 기본 1.
+  capbar '음성배속'(기본 1.15) → ttsBuild/make-all 의 speed → fillTts(speedFactor). 검증: 2.30s→2.04s MP3,
+  vrew playbackRate 전부 1.
 
 ## 줄글(prose) 대본 형식 추가 (2026-06-17, v0.1.8)
 - 신규 3번째 형식: `## 쇼츠 N` 안에 `제목:`(2줄) + `[훅]`/`[본론 심화]`/`[CTA]` 같은 **대괄호 그룹 헤더** + 그 아래 줄들=문장.

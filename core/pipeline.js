@@ -91,12 +91,23 @@ async function makeTtsManager(logger, engine) {
   return { mgr, ok };
 }
 
+// WAV(정속) → atempo 로 배속 구운 MP3. 피치 유지(atempo). 성공 시 true.
+function atempoWavToMp3(wavPath, mp3Path, tempo) {
+  if (!ffmpegPath) return false;
+  const args = ['-y', '-i', wavPath, '-filter:a', `atempo=${tempo}`,
+    '-codec:a', 'libmp3lame', '-b:a', '192k', '-ar', '24000', '-ac', '1', mp3Path];
+  const r = spawnSync(ffmpegPath, args, { stdio: 'ignore' });
+  return r.status === 0 && fs.existsSync(mp3Path);
+}
+
 // ── 오디오 채우기 ───────────────────────────────────────
-async function fillTts(project, preset, ttsMgr, workDir, onLine, abortSignal) {
+// TTS 는 항상 정속(1.0) 합성 → speedFactor(기본 1.15) 만큼 atempo 로 배속 구운 MP3 로 변환.
+//   배속이 음성에 직접 반영되므로 Vrew 배속(playbackRate) 불필요. 8초 그룹·.vrew 모두 이 음성 사용.
+async function fillTts(project, preset, ttsMgr, workDir, onLine, abortSignal, speedFactor = 1.15) {
   fs.mkdirSync(workDir, { recursive: true });
+  const sf = (speedFactor != null && Number(speedFactor) > 0) ? Number(speedFactor) : 1;
   for (const s of project.sentences) {
     if (abortSignal && abortSignal()) { if (onLine) onLine('⏹ TTS 중단'); break; }
-    const out = path.join(workDir, `${s.num}.wav`);
     const res = await ttsMgr.synthesize(s.text, {
       provider: preset.engine,
       refAudioPath: preset.voiceCloneRefAudio || undefined,
@@ -104,14 +115,28 @@ async function fillTts(project, preset, ttsMgr, workDir, onLine, abortSignal) {
       instruct: preset.instruct || undefined,
       cfgValue: preset.cfgValue,
       inferenceTimesteps: preset.inferenceTimesteps,
-      speed: 1.0,                 // TTS 는 항상 정속 — 속도 조절은 Vrew 배속(playbackRate)으로 처리
+      speed: 1.0,                 // 합성은 항상 정속
       language: preset.language,
       seed: preset.seed,
     });
-    fs.writeFileSync(out, res.mp3Buffer);
-    s.ttsAudioPath = out;
-    s.ttsDurationSec = res.durationSec;
-    if (onLine) onLine(`tts 쇼츠${project.shortsNum} 컷${s.num}: ${res.durationSec.toFixed(2)}s`);
+    if (sf !== 1) {
+      // 정속 WAV → atempo 배속 MP3
+      const wavTmp = path.join(workDir, `_raw_${s.num}.wav`);
+      fs.writeFileSync(wavTmp, res.mp3Buffer);
+      const mp3 = path.join(workDir, `${s.num}.mp3`);
+      const ok = atempoWavToMp3(wavTmp, mp3, sf);
+      try { fs.unlinkSync(wavTmp); } catch {}
+      if (ok) { s.ttsAudioPath = mp3; s.ttsDurationSec = res.durationSec / sf; }
+      else { // ffmpeg 실패 폴백: 정속 WAV 그대로
+        const wav = path.join(workDir, `${s.num}.wav`); fs.writeFileSync(wav, res.mp3Buffer);
+        s.ttsAudioPath = wav; s.ttsDurationSec = res.durationSec;
+      }
+    } else {
+      const out = path.join(workDir, `${s.num}.wav`);
+      fs.writeFileSync(out, res.mp3Buffer);
+      s.ttsAudioPath = out; s.ttsDurationSec = res.durationSec;
+    }
+    if (onLine) onLine(`tts 쇼츠${project.shortsNum} 컷${s.num}: ${s.ttsDurationSec.toFixed(2)}s${sf !== 1 ? ` (${sf}x)` : ''}`);
   }
 }
 
@@ -138,7 +163,7 @@ async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxCha
     aspect: project.aspect || '9:16',
     skipSelfCheck: true,            // 이미지 미연결 단계에서 누락을 에러로 막지 않음
     captionMaxChars: captionMaxChars || 7,
-    playbackRate: (playbackRate != null && Number(playbackRate) > 0) ? Number(playbackRate) : 1.15, // Vrew 배속(기본 1.15)
+    playbackRate: (playbackRate != null && Number(playbackRate) > 0) ? Number(playbackRate) : 1, // Vrew 배속 미사용(음성에 이미 배속 반영) — 기본 1
     logger: logger || (() => {}),
   };
   if (preset) {
