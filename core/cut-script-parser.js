@@ -18,6 +18,8 @@
  * ▸ 구(컷) 형식 — 하위호환. 컷=문장=그룹 1:1:1:
  *     ① (훅) 나레이션
  *        `image prompt`
+ *        🎬 `video/motion prompt`   ← (선택) 있으면 Grok 영상에 이 프롬프트 사용(없으면 기본값)
+ *        🎞 모션 힌트               ← (선택) videoPrompt 없을 때 폴백·켄번스 설명
  *
  * 데이터 매핑(공통): 그룹 → Group(imagePrompt/videoPrompt/phase/mode), 문장 → Sentence.
  *   ## 쇼츠 N → Project (aspect '9:16'). 한 파일 → Project 여러 개.
@@ -168,12 +170,26 @@ function parseShortsBlock(lines) {
     const hm = line.match(HOOK_RE);
     if (hm) { hookCaption = hm[1].trim(); continue; }
     if (CUTLIST_HEADER_RE.test(line)) continue;
+    // 🎬 비디오(I2V) 프롬프트 — 컷 이미지 프롬프트 다음 줄. 있으면 Grok 기본 모션 대신 사용.
+    //   예) 🎬 `slow push-in on her face, gentle falling snow, cinematic`
+    if (/^\s*-?\s*🎬/.test(line)) {
+      const bp = backtick(t);
+      if (bp && cuts.length) cuts[cuts.length - 1].videoPrompt = bp;
+      continue;
+    }
+    // 🎞 모션 힌트 — 영상이 안 만들어지는 컷의 켄번스 설명 / videoPrompt 없을 때 폴백.
+    if (/^\s*-?\s*🎞/.test(line) || /^\s*-?\s*모션\s*[:：]/.test(t)) {
+      // '🎞', '🎞️', 선택적 '모션', 선택적 콜론만 제거 — 설명 본문은 보존
+      const note = t.replace(/^-?\s*(?:🎞️?)?\s*(?:모션)?\s*[:：]?\s*/, '').replace(/`/g, '').trim();
+      if (note && cuts.length) cuts[cuts.length - 1].motionNote = note;
+      continue;
+    }
     const pm = line.match(PROMPT_LINE_RE);
     if (pm) { if (cuts.length) cuts[cuts.length - 1].imagePrompt = pm[1].trim(); continue; }
     if (t.startsWith('`') && !(t.length > 1 && t.endsWith('`'))) { collecting = line; continue; }
     const cm = line.match(CUT_RE);
     if (cm && circledToInt(cm[1])) {
-      cuts.push({ index: circledToInt(cm[1]), phase: (cm[2] || '').trim() || null, narration: (cm[3] || '').trim(), imagePrompt: null });
+      cuts.push({ index: circledToInt(cm[1]), phase: (cm[2] || '').trim() || null, narration: (cm[3] || '').trim(), imagePrompt: null, videoPrompt: null, motionNote: null });
       continue;
     }
   }
@@ -188,10 +204,13 @@ function buildProjectModel(cuts) {
     const s = new Sentence({ id: sid(c.narration), num: i + 1, text: c.narration });
     const g = new Group({ num: i + 1, sentenceIds: [s.id] });
     g.imagePrompt = c.imagePrompt || null;
+    g.videoPrompt = c.videoPrompt || null;
+    g.motionNote = c.motionNote || null;
     g.phase = c.phase || null;
     g.title = c.phase || null;
-    g.mode = (c.phase === '훅') ? 'i2v' : 'motion';
-    g.isI2V = (c.phase === '훅');
+    // 🎬 비디오 프롬프트가 있거나 훅이면 I2V 그룹으로 표시
+    g.isI2V = !!c.videoPrompt || (c.phase === '훅');
+    g.mode = g.isI2V ? 'i2v' : 'motion';
     s.groupId = g.id;
     sentences.push(s);
     groups.push(g);
