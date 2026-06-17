@@ -104,7 +104,7 @@ async function fillTts(project, preset, ttsMgr, workDir, onLine, abortSignal) {
       instruct: preset.instruct || undefined,
       cfgValue: preset.cfgValue,
       inferenceTimesteps: preset.inferenceTimesteps,
-      speed: preset.speed,
+      speed: 1.0,                 // TTS 는 항상 정속 — 속도 조절은 Vrew 배속(playbackRate)으로 처리
       language: preset.language,
       seed: preset.seed,
     });
@@ -133,11 +133,12 @@ function fillSilent(project, workDir) {
 }
 
 // ── .vrew 내보내기 (편별) ───────────────────────────────
-async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxChars) {
+async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxChars, playbackRate) {
   const opts = {
     aspect: project.aspect || '9:16',
     skipSelfCheck: true,            // 이미지 미연결 단계에서 누락을 에러로 막지 않음
     captionMaxChars: captionMaxChars || 7,
+    playbackRate: (playbackRate != null && Number(playbackRate) > 0) ? Number(playbackRate) : 1.15, // Vrew 배속(기본 1.15)
     logger: logger || (() => {}),
   };
   if (preset) {

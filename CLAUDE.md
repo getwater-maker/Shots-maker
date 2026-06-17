@@ -26,8 +26,10 @@
 - **이미지 프롬프트 내보내기/가져오기/API**(`core/prompt-io.js`, IPC export-prompts/import-prompts/
   generate-prompts-api, UI 📤내보내기·📥가져오기+모달): PrimingFlow 포팅. 편-그룹 복합 라벨 `## [쇼츠-그룹]`로
   3편 한 번에. 안전치환(PROMPT_SAFE_RULES) 포함. API는 secret-store 키(gemini/claude/openai).
-- ⏭ **미완(F2)**: 속도 → Vrew 배속(기본 1.15) + TTS 정속. 정확한 playbackRate 필드 위해 사용자가
-  Vrew에서 배속 1.15 설정·저장한 .vrew 샘플 제공 후 구현 예정(자막위치·도형과 동일한 역공학 방식).
+- **속도 → Vrew 배속(기본 1.15) + TTS 정속**(v0.1.6): 사용자 .vrew 역공학 결과 — `words[].playbackRate`
+  에만 배속(type 0·2 모두), duration/originalDuration 은 자연값 유지, `ttsClip` 트랙은 playbackRate 1.
+  fillTts 합성 speed=1.0 고정, capbar '속도'→'Vrew배속'(기본 1.15), export-vrew/make-all 의 speed →
+  buildProjectVrew(playbackRate) → buildVrew opts.playbackRate. 검증: word 1.15 / ttsClip 1 일치.
 
 ## PrimingFlow와의 관계 (중요)
 - 엔진(flow/genspark/grok-engine, vrew-builder, tts, video-renderer, anti-detect, project-model)은

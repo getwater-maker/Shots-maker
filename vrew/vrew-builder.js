@@ -696,6 +696,12 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
   }
   log(`[Vrew] 출력 비율 ${_aspect} (캔버스 ${_canvasW}×${_canvasH}, ratio ${_frameRatio})`);
 
+  // Vrew 배속(playbackRate) — TTS 는 정속(1.0)으로 만들고 Vrew 에서 이 배속으로 빠르게 재생.
+  //   사용자 .vrew 분석: 단어(words[].playbackRate)에만 들어가고 duration/originalDuration 은 자연값 유지,
+  //   ttsClip 트랙 playbackRate 는 1 그대로. (기본 1.15)
+  const _playbackRate = (opts.playbackRate != null && Number(opts.playbackRate) > 0) ? Number(opts.playbackRate) : 1.15;
+  log(`[Vrew] 배속(playbackRate) ${_playbackRate}x — TTS 정속, Vrew 에서 가속 재생`);
+
   // 사용자가 프리셋에서 지정한 자막 옵션을 기본값에 병합 (없으면 기본값 사용)
   const _userCap = opts.captionStyle || {};
 
@@ -1040,7 +1046,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
         wordsArr.push({
           id: sid(),
           text: tk,
-          playbackRate: 1,
+          playbackRate: _playbackRate,
           duration: wDur,
           aligned: false,
           type: 0,
@@ -1056,7 +1062,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       wordsArr.push({
         id: sid(),
         text: '',
-        playbackRate: 1,
+        playbackRate: _playbackRate,
         duration: 0,
         aligned: false,
         type: 2,

@@ -128,13 +128,12 @@ function ensureDirs(outRoot) {
 ipcMain.handle('tts-build', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum = null, dry = false, presetName = null } = args;
-  const { speed = null } = args;
   S.abort = false;
   if (!dry) {
     S.preset = P.getPreset(presetName);
     if (!S.preset) throw new Error('프리셋을 찾을 수 없습니다.');
-    if (speed != null && speed !== '') S.preset = { ...S.preset, speed: Number(speed) };
-    log(`프리셋 "${S.preset.name}" (${S.preset.engine}, 속도 ${S.preset.speed}x) 연결 중…`);
+    // TTS 는 항상 정속(1.0)으로 합성 — 속도 조절은 Vrew 배속(playbackRate)에서 처리
+    log(`프리셋 "${S.preset.name}" (${S.preset.engine}, TTS 정속) 연결 중…`);
     const { mgr, ok } = await P.makeTtsManager(log, S.preset.engine);
     if (!ok) throw new Error(`TTS 엔진 '${S.preset.engine}' 미가동 (백엔드 확인)`);
     S.ttsMgr = mgr;
@@ -152,7 +151,7 @@ ipcMain.handle('tts-build', async (_e, args = {}) => {
 
 ipcMain.handle('export-vrew', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { shortsNum = null, presetName = null, captionStyle = null, captionMaxChars = 7 } = args;
+  const { shortsNum = null, presetName = null, captionStyle = null, captionMaxChars = 7, speed = null } = args;
   try { fs.mkdirSync(S.outRoot, { recursive: true }); } catch {}
   let preset = S.preset || P.getPreset(presetName);
   if (preset && captionStyle) {
@@ -164,7 +163,7 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
     const dirs = shortsDirs(S.outRoot, pr.shortsNum);
     const vrewPath = path.join(S.outRoot, `쇼츠${pr.shortsNum}.vrew`);
     try {
-      const res = await P.buildProjectVrew(pr, vrewPath, preset, log, captionMaxChars);
+      const res = await P.buildProjectVrew(pr, vrewPath, preset, log, captionMaxChars, speed);
       P.writeSrt(pr, path.join(dirs.subtitles, `쇼츠${pr.shortsNum}.srt`), captionMaxChars);
       outs.push({ shortsNum: pr.shortsNum, vrewPath, clipCount: res.clipCount, imageCount: res.imageCount });
       log(`✓ 쇼츠${pr.shortsNum}.vrew (clip ${res.clipCount}, image ${res.imageCount})`);
@@ -482,7 +481,7 @@ ipcMain.handle('make-all', async (_e, args = {}) => {
   const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId = null, videoCount = 'random', dry = false } = args;
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
   let preset = P.getPreset(presetName);
-  if (preset && speed != null && speed !== '') preset = { ...preset, speed: Number(speed) };
+  // TTS 는 정속(1.0) — speed 값은 Vrew 배속(playbackRate)으로만 사용
   S.preset = preset;
   let ttsMgr = null;
   if (!dry && preset) {
@@ -511,7 +510,7 @@ ipcMain.handle('make-all', async (_e, args = {}) => {
     if (ep && captionStyle) ep = { ...ep, captionStyle: { ...(ep.captionStyle || {}), ...captionStyle } };
     const vrewPath = path.join(S.outRoot, `쇼츠${pr.shortsNum}.vrew`);
     try {
-      const res = await P.buildProjectVrew(pr, vrewPath, ep, log, captionMaxChars);
+      const res = await P.buildProjectVrew(pr, vrewPath, ep, log, captionMaxChars, speed);
       P.writeSrt(pr, path.join(dirs.subtitles, `쇼츠${pr.shortsNum}.srt`), captionMaxChars);
       log(`✓ ${pr.title}.vrew (clip ${res.clipCount})`);
       shell.openPath(vrewPath);
