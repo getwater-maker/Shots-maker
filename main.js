@@ -145,6 +145,10 @@ ipcMain.handle('tts-build', async (_e, args = {}) => {
     if (S.abort) { log('⏹ 중단됨'); break; }
     if (dry) { P.fillSilent(pr, ttsDir); log(`✓ 쇼츠${pr.shortsNum} 무음 오디오`); }
     else { await P.fillTts(pr, S.preset, S.ttsMgr, ttsDir, log, () => S.abort); log(`✓ 쇼츠${pr.shortsNum} 음성 완료`); }
+    // 음성변환 직후: 문장 기준 8.0초 미만 단위로 그룹 자동 재구성
+    const m = P.mergeGroupsByTts(pr, 8.0);
+    log(`  ↳ 8초 미만 단위로 그룹 재구성: ${m.before} → ${m.after}개`);
+    pushDtoUpdate();
   }
   return P.toDTO(S.parsed);
 });
@@ -678,8 +682,8 @@ ipcMain.handle('merge-groups', (_e, args = {}) => {
     const hasTts = pr.sentences.some((s) => s.ttsDurationSec != null);
     if (!hasTts) { log(`쇼츠${pr.shortsNum}: TTS를 먼저 변환하세요 (시간 정보 없음)`); continue; }
     const r = P.mergeGroupsByTts(pr, 8.0);
-    log(`🔗 쇼츠${pr.shortsNum} 그룹 합치기: ${r.before}개 → ${r.after}개 (${r.merged}개 감소, 각 ≤8.0초)`);
-    total += r.merged; done++;
+    log(`🔗 쇼츠${pr.shortsNum} 문장 기준 8초 미만 단위 재구성: ${r.before}개 → ${r.after}개`);
+    total += Math.abs(r.merged); done++;
   }
   if (!done) log('합칠 대상이 없습니다 — TTS 변환을 먼저 하세요.');
   return P.toDTO(S.parsed);

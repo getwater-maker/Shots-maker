@@ -281,35 +281,44 @@ async function generateHookVideosGrok(project, videoDir, logger, abortSignal, vi
   return results;
 }
 
-// ── 그룹 합치기 (TTS 시간 8초 미만 묶기) ────────────────
-// TTS 변환 후 호출. 앞에서부터 연속 그룹을 누적해 합이 maxSec(8.0)을 넘지 않는 선까지 한 그룹으로 합침.
-// 절대 maxSec 를 초과하지 않음(문장 단위라 정확히 8.0은 못 맞춰도 근처). 한 그룹이 이미 ≥maxSec 면 단독 유지.
-// 합쳐진 그룹은 문장을 모두 합치고, 이미지/영상 프롬프트·경로는 비움(합친 뒤 내보내기/가져오기로 새로 만듦).
+// ── 그룹 재구성: 문장 기준 8초 미만 단위 (TTS 후 자동 호출) ──────────────
+// 모든 문장을 순서대로 그리디 패킹 — 각 그룹의 TTS 합이 maxSec(8.0)을 넘지 않게.
+//   · 큰 그룹(문장 多, >8초)은 쪼개지고, 작은 그룹들은 합쳐짐 → 결과 그룹은 모두 <8.0초.
+//   · 단일 문장이 maxSec 를 넘으면(드묾) 그 문장 단독 그룹(쪼갤 수 없음).
+//   · 각 새 그룹의 phase/프롬프트는 첫 문장이 속했던 원본 그룹 값을 보존(프롬프트 없으면 null).
 function mergeGroupsByTts(project, maxSec = 8.0) {
   const { Group, finalizeGroupIds } = require('./project-model');
   const groups = project.groups;
-  if (!groups || groups.length < 2) return { before: groups ? groups.length : 0, after: groups ? groups.length : 0, merged: 0 };
-  const durOf = (g) => project.getSentencesOfGroup(g).reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
+  if (!groups || !groups.length) return { before: 0, after: 0, merged: 0 };
 
+  // 문장을 그룹 순서대로 평탄화 (원본 그룹의 phase/프롬프트 동반)
+  const ordered = [];
+  for (const g of groups) {
+    for (const s of project.getSentencesOfGroup(g)) {
+      ordered.push({ s, phase: g.phase || null, imagePrompt: g.imagePrompt || null, videoPrompt: g.videoPrompt || null, motionNote: g.motionNote || null });
+    }
+  }
+  if (!ordered.length) return { before: groups.length, after: groups.length, merged: 0 };
+
+  // 문장 단위 그리디 패킹 (8초 캡)
   const buckets = [];
   let cur = null, curDur = 0;
-  for (const g of groups) {
-    const d = durOf(g);
-    if (cur && (curDur + d) <= maxSec + 1e-6) { cur.push(g); curDur += d; }
-    else { cur = [g]; curDur = d; buckets.push(cur); }
+  for (const it of ordered) {
+    const d = it.s.ttsDurationSec || 0;
+    if (cur && (curDur + d) <= maxSec + 1e-6) { cur.push(it); curDur += d; }
+    else { cur = [it]; curDur = d; buckets.push(cur); }
   }
 
   const newGroups = buckets.map((bucket, i) => {
     const first = bucket[0];
-    const ng = new Group({ num: i + 1, sentenceIds: bucket.flatMap((g) => g.sentenceIds) });
-    ng.phase = first.phase || null;
-    ng.title = first.title || null;
-    ng.mode = first.mode || (first.isI2V ? 'i2v' : 'motion');
-    ng.isI2V = !!first.isI2V;
-    // 합친 뒤 새 프롬프트를 만들 것이므로 첫 그룹의 프롬프트만 임시 보존(없으면 null). 경로는 비움.
-    ng.imagePrompt = bucket.map((g) => g.imagePrompt).find((p) => p && p.trim()) || null;
-    ng.videoPrompt = bucket.map((g) => g.videoPrompt).find((p) => p && p.trim()) || null;
-    ng.motionNote = bucket.map((g) => g.motionNote).find((p) => p && p.trim()) || null;
+    const ng = new Group({ num: i + 1, sentenceIds: bucket.map((it) => it.s.id) });
+    ng.phase = first.phase;
+    ng.title = first.phase;
+    ng.imagePrompt = bucket.map((it) => it.imagePrompt).find((p) => p && p.trim()) || null;
+    ng.videoPrompt = bucket.map((it) => it.videoPrompt).find((p) => p && p.trim()) || null;
+    ng.motionNote = bucket.map((it) => it.motionNote).find((p) => p && p.trim()) || null;
+    ng.isI2V = !!ng.videoPrompt;
+    ng.mode = ng.isI2V ? 'i2v' : 'motion';
     return ng;
   });
 

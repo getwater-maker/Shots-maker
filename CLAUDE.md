@@ -20,9 +20,11 @@
 ## 최근 기능 추가 (2026-06-17, v0.1.5)
 - **도형 위치·크기 고정**: vrew-builder `addShapeTrack` 폰트기반 계산 제거 → 사용자 .vrew 분석값 고정
   (xPos 0 / yPos 0.012 / width 1 / height 0.203). 배경 도형 **기본 ON**(parser `proj.bgEnabled=true`).
-- **그룹 합치기**(`P.mergeGroupsByTts`, IPC `merge-groups`, UI 🔗합치기): TTS 후 앞에서부터 연속 그룹의
-  TTS합이 **8.0초 넘지 않는 선까지** 한 그룹으로 통합(문장 통합, 첫 그룹 프롬프트만 임시 보존, 경로 비움).
-  워크플로우: TTS → 합치기 → 내보내기/가져오기로 프롬프트 생성 → 이미지.
+- **그룹 8초 재구성**(`P.mergeGroupsByTts`, IPC `merge-groups`, UI 🔗합치기 + **TTS 후 자동**): v0.1.9에서
+  **문장 단위 그리디 패킹**으로 변경 — 모든 문장을 순서대로 8.0초 캡으로 다시 묶음. **큰 그룹은 쪼개지고
+  (예 훅강화 12.6s→2그룹) 작은 그룹은 합쳐져** 결과 그룹 전부 <8.0초. 단일 문장>8초면 단독. 첫 문장 원본
+  그룹의 phase/프롬프트 보존. tts-build 가 음성변환 직후 자동 호출(`pushDtoUpdate`). 워크플로우: TTS(자동 재구성)
+  → 내보내기/가져오기로 프롬프트 → 이미지.
 - **이미지 프롬프트 내보내기/가져오기/API**(`core/prompt-io.js`, IPC export-prompts/import-prompts/
   generate-prompts-api, UI 📤내보내기·📥가져오기+모달): PrimingFlow 포팅. 편-그룹 복합 라벨 `## [쇼츠-그룹]`로
   3편 한 번에. 안전치환(PROMPT_SAFE_RULES) 포함. API는 secret-store 키(gemini/claude/openai).
