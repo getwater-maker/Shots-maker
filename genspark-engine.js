@@ -509,7 +509,7 @@ class GensparkEngine {
    *   abortSignal : () => boolean
    * @returns Array< { path?, width?, height?, error? } >  (prompts 와 같은 길이/순서)
    */
-  async generateImagesBatch({ prompts, outputPaths, abortSignal }) {
+  async generateImagesBatch({ prompts, outputPaths, abortSignal, onSaved }) {
     const N = prompts.length;
     const fail = (msg) => prompts.map(() => ({ error: msg }));
 
@@ -615,6 +615,7 @@ class GensparkEngine {
           const r = await this._fetchAndSave(newSrcs[i], outputPaths[i]);
           GensparkStore.markUsed();
           results.push(r);
+          if (r && r.path && onSaved) { try { onSaved(i, r.path); } catch {} } // 저장 즉시 매핑 통지
         } catch (e) {
           results.push({ error: e.message });
         }

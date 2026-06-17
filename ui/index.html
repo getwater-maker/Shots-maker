@@ -63,6 +63,12 @@
   .thumbwrap{position:relative;width:150px;height:264px}
   .playbadge{position:absolute;left:6px;bottom:6px;color:#fff;font-size:13px;background:rgba(125,79,163,.85);
     border-radius:5px;padding:1px 6px;pointer-events:none}
+  /* 생성 중 오버레이 — 이미지/영상이 만들어지는 동안 그룹 썸네일 위에 표시 */
+  .genoverlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;
+    background:rgba(26,23,20,.62);border-radius:9px;color:#fff;font-size:13px;font-weight:700;text-align:center;pointer-events:none}
+  .genoverlay .spin{width:30px;height:30px;border:3px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .thumb.none.gen{color:#fff;background:#1a1714}
   .thumbx{position:absolute;top:5px;right:5px;width:24px;height:24px;border-radius:50%;border:none;
     background:rgba(217,126,126,.92);color:#fff;font-size:13px;font-weight:700;cursor:pointer;line-height:1;padding:0}
   .thumbx:hover{background:var(--danger)}
@@ -312,8 +318,15 @@ function renderCards(){
       const tag = `${pr.shortsNum}_${c.num}`;
       const clearBtn = `<button class="thumbx" data-clear="${tag}" title="첨부 삭제">✕</button>`;
       let thumb;
+      // 생성 중 오버레이 (스피너 + 문구)
+      const genOv = (txt)=>`<div class="genoverlay"><div class="spin"></div><div>${txt}</div></div>`;
       if (c.videoPath) thumb = `<div class="thumbwrap"><video class="thumb" src="${media(c.videoPath)}" autoplay muted loop playsinline data-attach="${tag}" title="클릭: 이미지/영상 교체"></video><span class="playbadge">🎬 영상</span>${clearBtn}</div>`;
-      else if (c.imagePath) thumb = `<div class="thumbwrap"><img class="thumb" src="${media(c.imagePath)}" data-attach="${tag}" title="클릭: 이미지/영상 교체">${clearBtn}</div>`;
+      else if (c.imagePath) {
+        // 이미지 있음 — 영상 변환 중이면 그 위에 '영상 변환 중' 오버레이
+        const ov = (c.videoStatus==='generating') ? genOv('🎬 영상 변환 중…') : '';
+        thumb = `<div class="thumbwrap"><img class="thumb" src="${media(c.imagePath)}" data-attach="${tag}" title="클릭: 이미지/영상 교체">${ov}${clearBtn}</div>`;
+      }
+      else if (c.imageStatus==='generating') thumb = `<div class="thumbwrap"><div class="thumb none gen"></div>${genOv('🖼 이미지 생성 중…')}</div>`;
       else thumb = `<div class="thumb none" data-attach="${tag}" title="클릭: 이미지/영상 첨부">＋</div>`;
       // 그룹 내 문장들 — 브루 클립 단위(N자/쉼표)로 넘버링 (문장별 시간 표시는 제거)
       const sents = (c.sentences||[]).map(s=>{

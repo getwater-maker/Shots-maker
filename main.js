@@ -274,12 +274,13 @@ ipcMain.handle('image-build', async (_e, args = {}) => {
       if (engine === 'flow') {
         await runFlowImages(pr, mediaDir, log, stylePrompt);
       } else {
-        await P.generateImagesGenspark(pr, mediaDir, log, () => S.abort, stylePrompt);
+        await P.generateImagesGenspark(pr, mediaDir, log, () => S.abort, stylePrompt, null, pushDtoUpdate);
       }
       log(`✓ 쇼츠${pr.shortsNum} 이미지 완료`);
     } catch (e) {
       log(`✗ 쇼츠${pr.shortsNum} 이미지 실패: ${e.message}`);
     }
+    pushDtoUpdate(); // 생성된 이미지(g.imagePath)를 UI 썸네일에 즉시 반영
   }
   return P.toDTO(S.parsed);
 });
@@ -304,11 +305,12 @@ ipcMain.handle('video-build', async (_e, args = {}) => {
     log(`🎬 쇼츠${pr.shortsNum} 영상 ${vc}개 생성 (Grok)…`);
     try {
       const videoDir = shortsDirs(S.outRoot, pr.shortsNum).media; // 영상도 media-N 폴더
-      await P.generateHookVideosGrok(pr, videoDir, log, () => S.abort, vc);
+      await P.generateHookVideosGrok(pr, videoDir, log, () => S.abort, vc, pushDtoUpdate);
       log(`✓ 쇼츠${pr.shortsNum} 영상 완료`);
     } catch (e) {
       log(`✗ 쇼츠${pr.shortsNum} 영상 실패: ${e.message}`);
     }
+    pushDtoUpdate(); // 생성된 영상(g.videoPath)을 UI 썸네일에 즉시 반영
   }
   return P.toDTO(S.parsed);
 });
@@ -498,11 +500,13 @@ ipcMain.handle('make-all', async (_e, args = {}) => {
     const audioTask = dry ? Promise.resolve().then(() => P.fillSilent(pr, dirs.tts))
       : P.fillTts(pr, preset, ttsMgr, dirs.tts, log, () => S.abort);
     const imgTask = (engine === 'flow') ? runFlowImages(pr, dirs.media, log, stylePrompt)
-      : P.generateImagesGenspark(pr, dirs.media, log, () => S.abort, stylePrompt);
+      : P.generateImagesGenspark(pr, dirs.media, log, () => S.abort, stylePrompt, null, pushDtoUpdate);
     await Promise.allSettled([audioTask, imgTask]);
+    pushDtoUpdate(); // TTS·이미지 매핑(g.imagePath) 결과를 UI 썸네일에 즉시 반영
     if (S.abort) { log('⏹ 중단됨'); break; }
-    try { await P.generateHookVideosGrok(pr, dirs.media, log, () => S.abort, resolveVideoCount(videoCount, pr.groups.length)); }
+    try { await P.generateHookVideosGrok(pr, dirs.media, log, () => S.abort, resolveVideoCount(videoCount, pr.groups.length), pushDtoUpdate); }
     catch (e) { log(`영상 실패: ${e.message}`); }
+    pushDtoUpdate(); // 생성된 영상(g.videoPath)도 UI 에 반영
     let ep = preset;
     if (ep && captionStyle) ep = { ...ep, captionStyle: { ...(ep.captionStyle || {}), ...captionStyle } };
     const vrewPath = path.join(S.outRoot, `쇼츠${pr.shortsNum}.vrew`);
@@ -554,7 +558,7 @@ ipcMain.handle('regen-group', async (_e, args = {}) => {
   const mediaDir = shortsDirs(S.outRoot, shortsNum).media;
   log(`🔄 쇼츠${shortsNum} G${groupNum} 이미지 재생성 (Genspark)…`);
   try {
-    await P.generateImagesGenspark(pr, mediaDir, log, () => S.abort, stylePrompt, [groupNum]);
+    await P.generateImagesGenspark(pr, mediaDir, log, () => S.abort, stylePrompt, [groupNum], pushDtoUpdate);
     log(`✓ G${groupNum} 재생성 완료`);
   } catch (e) { log(`✗ G${groupNum} 재생성 실패: ${e.message}`); }
   return P.toDTO(S.parsed);

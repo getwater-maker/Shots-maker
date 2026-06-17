@@ -578,6 +578,9 @@ class GrokEngine {
       // 가 뜨면 grok.com 이 자체적으로 강등해서 영상 만들기 시작함. 우리는 사실 감지만 하면 됨.
       // 한 영상당 한 번만 로그 + 결과에 downgradedTo:'480p' 플래그.
       let _downgradeDetected = false;
+      // 동일 https video URL 이 ready 상태로 연속 감지된 횟수 — 프리뷰가 아닌 완성본 확인용
+      let stableReady = 0;
+      let lastReadyUrl = null;
       while (Date.now() - startedAt < TIMEOUT_MS) {
         if (abortSignal && abortSignal()) return { success: false, error: '사용자 중단' };
         await this.page.waitForTimeout(POLL_INTERVAL);
@@ -599,44 +602,58 @@ class GrokEngine {
         const v = await this.page.$(GROK_SELECTORS.videoElement);
         if (v) {
           const src = await v.getAttribute('src');
-          if (src && !src.includes('blob:')) {
-            // blob: 가 아닌 실제 URL 이면 직접 fetch 가능
+          if (src && src.startsWith('http') && !src.includes('blob:')) {
+            // blob: 가 아닌 실제 URL 이면 직접 fetch 가능 (동일 URL 반복 로그는 생략)
+            if (videoUrl !== src) this.log(`[Grok] video src 감지: ${src.substring(0, 60)}...`);
             videoUrl = src;
-            this.log(`[Grok] video src 감지: ${src.substring(0, 60)}...`);
           } else if (src) {
             this.log(`[Grok] blob video 감지 — 다운로드 버튼 사용`);
           }
         }
 
-        // 다운로드 버튼이 있으면 enabled + 비디오 ready 두 조건 모두 만족할 때만 클릭.
-        // (이전 버그: enabled 만으로 클릭 → 생성 중인 placeholder 다운로드 → 정적 10초 mp4)
-        // videoReady 정의: <video> 의 duration > 1초 + readyState >= 2 (HAVE_CURRENT_DATA).
-        // 둘 다 진짜 생성 완료된 비디오 element 가 mount 됐을 때만 true.
+        // 비디오 ready 판정 — 다운로드 버튼과 무관하게 직접 측정.
+        // (이전 버그: 생성 중 placeholder 다운로드 → 정적 mp4) 방지: duration>1 + readyState>=2.
+        let videoReady = false;
+        try {
+          videoReady = await this.page.evaluate((sel) => {
+            const v = document.querySelector(sel) || document.querySelector('main article video') || document.querySelector('video');
+            if (!v || v.tagName !== 'VIDEO') return false;
+            const dur = isFinite(v.duration) ? v.duration : 0;
+            return v.readyState >= 2 && dur > 1;
+          }, GROK_SELECTORS.videoElement);
+        } catch { videoReady = false; }
+
+        // ★ 1순위 (화면 구성 변경에 강함): 실제 https video URL + 비디오 ready → 다운로드 버튼 없이 즉시 URL 다운로드.
+        //   Grok UI 가 자주 바뀌어 다운로드 버튼 셀렉터가 깨지므로 버튼에 의존하지 않음.
+        //   동일 URL 이 2회 연속 ready 로 잡히면(≈10초 안정) 프리뷰가 아닌 완성본으로 보고 다운로드.
+        if (videoUrl && videoUrl.startsWith('http') && videoReady) {
+          if (videoUrl === lastReadyUrl) stableReady++; else { stableReady = 1; lastReadyUrl = videoUrl; }
+          if (stableReady >= 2) {
+            try {
+              const res = await this.page.context().request.get(videoUrl);
+              const buf = await res.body();
+              fs.writeFileSync(outputPath, buf);
+              GrokStore.markUsed();
+              this.log(`[Grok] ✅ video URL 직접 다운로드 (완료 감지): ${outputPath}`);
+              return { success: true, videoPath: outputPath, downgradedTo: _downgradeDetected ? '480p' : null };
+            } catch (eDirect) {
+              this.log(`[Grok] URL 직접 다운로드 실패 (${eDirect.message}) — 다운로드 버튼으로 폴백`);
+            }
+          } else {
+            this.log(`[Grok] 비디오 ready — 안정성 확인 중 (${stableReady}/2)`);
+          }
+        } else {
+          stableReady = 0;
+        }
+
+        // 2순위 (폴백): blob 비디오이거나 URL 직접 다운로드가 안 될 때만 다운로드 버튼 사용.
         const dlBtn = await this.page.$(GROK_SELECTORS.downloadButton);
         let dlEnabled = false;
         if (dlBtn) {
           try { dlEnabled = await dlBtn.isEnabled(); } catch { dlEnabled = false; }
         }
-        let videoReady = false;
-        if (dlEnabled) {
-          try {
-            videoReady = await this.page.evaluate(() => {
-              const v = document.querySelector('main article video');
-              if (!v) return false;
-              const dur = isFinite(v.duration) ? v.duration : 0;
-              return v.readyState >= 2 && dur > 1;
-            });
-          } catch { videoReady = false; }
-          if (!videoReady) {
-            // 다운로드 버튼은 enabled 인데 비디오는 아직 안 됨 — 다음 폴링 사이클로
-            const elapsed = Math.round((Date.now() - startedAt) / 1000);
-            this.log(`[Grok] 버튼 enabled 이나 비디오 미준비 (대기 ${elapsed}s)`);
-          }
-        }
         if (dlBtn && dlEnabled && videoReady) {
-          // 1순위: video src 가 실제 https URL 이면 직접 다운로드 — 버튼 클릭 생략.
-          //   (실측: 다운로드 버튼 클릭은 매번 5초+ timeout 후 fallback 으로만 성공
-          //    → 클립당 5~6초 낭비 + 불필요한 클릭 변수. URL 직접이 더 빠르고 안정적)
+          // video src 가 실제 https URL 이면 직접 다운로드 — 버튼 클릭 생략.
           if (videoUrl && videoUrl.startsWith('http')) {
             try {
               const res = await this.page.context().request.get(videoUrl);

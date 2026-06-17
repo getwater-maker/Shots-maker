@@ -64,6 +64,8 @@ function toDTO(parseResult) {
             motionNote: g.motionNote || '',
             imagePath: g.imagePath || null,
             videoPath: g.videoPath || null,
+            imageStatus: g.imageStatus || null, // 'generating' | 'done' | 'fail'
+            videoStatus: g.videoStatus || null, // 'generating' | 'done' | 'fail'
           };
         }),
       };
@@ -171,12 +173,16 @@ async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxCha
 
 // ── 이미지 생성 ─────────────────────────────────────────
 // group.imagePrompt 를 "그대로" 투입. 컷 num → cut{num}.png. 결과를 group.imagePath 에 매핑.
-async function generateImagesGenspark(project, imagesDir, logger, abortSignal, stylePrompt, onlyNums) {
+async function generateImagesGenspark(project, imagesDir, logger, abortSignal, stylePrompt, onlyNums, onProgress) {
   fs.mkdirSync(imagesDir, { recursive: true });
   const groups = project.groups;
   const idx = groups.map((g, i) => i).filter((i) => groups[i].imagePrompt && groups[i].imagePrompt.trim()
     && (!onlyNums || onlyNums.includes(groups[i].num)));
   if (!idx.length) { (logger || (() => {}))('이미지 프롬프트가 있는 컷이 없음'); return []; }
+
+  // 대상 그룹을 '생성 중'으로 표시 → UI 즉시 반영 (사용자가 진행 상황을 바로 인지)
+  idx.forEach((i) => { if (!groups[i].imagePath) groups[i].imageStatus = 'generating'; });
+  if (onProgress) { try { onProgress(); } catch {} }
 
   const log = logger || (() => {});
   // PrimingFlow 방식: 스타일을 앞, 대본 이미지 프롬프트를 뒤에 둠.
@@ -197,7 +203,12 @@ async function generateImagesGenspark(project, imagesDir, logger, abortSignal, s
       const ps = prompts.slice(start, start + BATCH);
       const ops = outputPaths.slice(start, start + BATCH);
       log(`[Genspark] 배치 ${start / BATCH + 1}: ${ps.length}장 한 번에 제출`);
-      const r = await eng.generateImagesBatch({ prompts: ps, outputPaths: ops, abortSignal: abortSignal || (() => false) });
+      // 저장되는 즉시 그룹에 매핑 → UI 갱신 (한 배치 안에서도 한 장씩 붙음)
+      const onSaved = (k, p) => {
+        const g = groups[idx[start + k]];
+        if (g && p) { g.imagePath = p; g.imageStatus = 'done'; if (onProgress) { try { onProgress(); } catch {} } }
+      };
+      const r = await eng.generateImagesBatch({ prompts: ps, outputPaths: ops, abortSignal: abortSignal || (() => false), onSaved });
       for (let k = 0; k < ps.length; k++) results[start + k] = r[k];
     }
   } finally {
@@ -207,8 +218,9 @@ async function generateImagesGenspark(project, imagesDir, logger, abortSignal, s
   results.forEach((r, k) => {
     const g = groups[idx[k]];
     if (r && r.path) { g.imagePath = r.path; g.imageStatus = 'done'; }
-    else { g.imageStatus = 'fail'; }
+    else if (g.imageStatus === 'generating') { g.imageStatus = 'fail'; }
   });
+  if (onProgress) { try { onProgress(); } catch {} }
   const ok = results.filter((r) => r && r.path).length;
   log(`이미지 ${ok}/${idx.length} 생성 (쇼츠${project.shortsNum})`);
   return results;
@@ -222,7 +234,7 @@ async function generateImages(project, engine, imagesDir, logger, abortSignal) {
 
 // ── 앞에서 N개 그룹 → Grok image-to-video (PrimingFlow 방식: 개수 지정) ──────────
 // videoCount 만큼 앞 그룹부터 영상화. 모션 프롬프트 = group.videoPrompt(I2V) || group.motionNote || Grok 기본.
-async function generateHookVideosGrok(project, videoDir, logger, abortSignal, videoCount) {
+async function generateHookVideosGrok(project, videoDir, logger, abortSignal, videoCount, onProgress) {
   fs.mkdirSync(videoDir, { recursive: true });
   const log = logger || (() => {});
   const N = Math.max(0, parseInt(videoCount, 10) || 0);
@@ -243,6 +255,7 @@ async function generateHookVideosGrok(project, videoDir, logger, abortSignal, vi
       }
       const outputPath = path.join(videoDir, `${String(g.num).padStart(2, '0')}.mp4`);
       g.videoStatus = 'generating';
+      if (onProgress) { try { onProgress(); } catch {} } // '영상 변환 중' 배지 즉시 표시
       const res = await eng.generateVideoFromImage({
         imagePath: g.imagePath,
         prompt: g.videoPrompt || g.motionNote || g.videoMotionPrompt || null, // 없으면 Grok 기본 모션
@@ -259,6 +272,7 @@ async function generateHookVideosGrok(project, videoDir, logger, abortSignal, vi
         log(`✗ 그룹${g.num} 영상 실패: ${res && res.error}`);
       }
       results.push({ num: g.num, ...res });
+      if (onProgress) { try { onProgress(); } catch {} } // 그룹별 영상 완성 시 UI 갱신
     }
   } finally {
     try { await eng.stop(); } catch {}

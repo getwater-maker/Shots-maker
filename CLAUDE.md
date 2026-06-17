@@ -7,6 +7,16 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 최근 버그픽스 (2026-06-17)
+- 🐞 **Genspark 이미지가 UI에 안 붙음**: `generateImagesGenspark`는 `g.imagePath`를 정상 매핑하지만,
+  make-all/image-build가 중간에 `pushDtoUpdate()`를 안 보내 작업 끝까지 썸네일이 안 보였음(Flow만 실시간).
+  → make-all에서 `Promise.allSettled` 직후 + 영상 후, image-build/video-build 각 쇼츠 후 `pushDtoUpdate()` 추가.
+  `generateHookVideosGrok`에 `onProgress` 콜백 추가 → 그룹별 영상 완성 시마다 UI 갱신(main이 pushDtoUpdate 전달).
+- 🐞 **Grok 영상 완료 감지 실패(화면 구성 변경)**: `downloadButton` 셀렉터(`div.absolute.-right-14 button:nth-child(4)`)가
+  새 UI와 안 맞아 `dlEnabled`가 계속 false → 실제 https videoUrl을 41초에 잡고도 5분 타임아웃 fallback까지 대기.
+  → grok-engine 폴링을 **다운로드 버튼 비의존**으로 변경: 실제 https videoUrl + 비디오 ready(readyState≥2 & dur>1)가
+  **2회 연속(≈10초 안정)** 잡히면 즉시 URL 직접 다운로드. 다운로드 버튼은 blob/실패 시 폴백으로만 사용.
+
 ## PrimingFlow와의 관계 (중요)
 - 엔진(flow/genspark/grok-engine, vrew-builder, tts, video-renderer, anti-detect, project-model)은
   `D:\PrimingFlow\rebuild` 에서 **복사**해 사용. 수정 시 원본과 갈라짐을 인지할 것.
