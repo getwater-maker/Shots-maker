@@ -466,7 +466,7 @@ function addAiNoticeTrack(pj, opt, clipDurations, log, frameRatio) {
 
 // 제목 배경 도형 (shape 트랙 + Svg .vbin). 제목 줄을 덮는 박스. 색/테두리/모서리/점선 조절.
 //   세로 = 제목 시작~끝, 가로 = 제목 폰트크기·글자수 비례 (사용자 요구). 제목보다 아래(zIndex).
-function addShapeTrack(pj, bg, t, frameRatio, mediaZip, log) {
+function addShapeTrack(pj, bg, t, frameRatio, mediaZip, log, clipIds = null, yShift = 0) {
   if (!fs.existsSync(SHAPE_VBIN)) { log('[Vrew] 도형 템플릿(.vbin) 없음 — 배경 생략'); return null; }
   const mid = uid();
   pj.files.push({ version: 1, mediaId: mid, sourceOrigin: 'USER', fileSize: fs.statSync(SHAPE_VBIN).size, name: `${mid}.xml`, type: 'Svg', fileLocation: 'IN_MEMORY' });
@@ -474,7 +474,7 @@ function addShapeTrack(pj, bg, t, frameRatio, mediaZip, log) {
 
   // 도형 위치·크기 고정 — 사용자 .vrew 분석값으로 고정(폰트/줄수와 무관하게 항상 동일).
   //   xPos 0(좌측 끝), yPos 0.012(상단), width 1(전체 폭), height 0.203.
-  const yTop = 0.012;
+  const yTop = 0.012 + yShift;
   const height = 0.203;
   const width = 1;
   const xPos = 0;
@@ -498,17 +498,17 @@ function addShapeTrack(pj, bg, t, frameRatio, mediaZip, log) {
   };
   const aid = uid();
   pj.props.assets[aid] = { trackIds: [tid], role: 'sub' };
-  for (const c of pj.transcript.clips) { if (!Array.isArray(c.assetIds)) c.assetIds = []; if (!c.assetIds.includes(aid)) c.assetIds.push(aid); }
-  log(`[Vrew] 제목 배경 도형 (fill ${bg.fillColor || '#000'}/${bg.fillOpacity != null ? bg.fillOpacity : 50}%, w${width.toFixed(2)} h${height.toFixed(2)})`);
+  const targetClips = clipIds ? pj.transcript.clips.filter((c) => clipIds.includes(c.id)) : pj.transcript.clips;
+  for (const c of targetClips) { if (!Array.isArray(c.assetIds)) c.assetIds = []; if (!c.assetIds.includes(aid)) c.assetIds.push(aid); }
   return true;
 }
 
 // 제목(훅) 상단 고정 텍스트 트랙 — 최대 2줄, 줄별 크기·색상·정렬. 영상 전체에 표시.
 //   addAiNoticeTrack 과 동일한 web/textbox(uc-0010) 방식. 줄별 정렬 위해 줄마다 별도 트랙.
-function addTitleTrack(pj, title, frameRatio, log) {
+function addTitleTrack(pj, title, frameRatio, log, clipIds = null, yShift = 0) {
   const lines = [
-    { text: String(title.line1 || '').trim(), st: title.l1 || {}, y: 0.035 },
-    { text: String(title.line2 || '').trim(), st: title.l2 || {}, y: 0.115 },
+    { text: String(title.line1 || '').trim(), st: title.l1 || {}, y: 0.035 + yShift },
+    { text: String(title.line2 || '').trim(), st: title.l2 || {}, y: 0.115 + yShift },
   ].filter((l) => l.text);
   if (!lines.length) return null;
 
@@ -547,12 +547,12 @@ function addTitleTrack(pj, title, frameRatio, log) {
     };
     const aid = uid();
     pj.props.assets[aid] = { trackIds: [tid], role: 'sub' };
-    for (const c of pj.transcript.clips) {
+    const targetClips = clipIds ? pj.transcript.clips.filter((c) => clipIds.includes(c.id)) : pj.transcript.clips;
+    for (const c of targetClips) {
       if (!Array.isArray(c.assetIds)) c.assetIds = [];
       if (!c.assetIds.includes(aid)) c.assetIds.push(aid);
     }
   }
-  log(`[Vrew] 제목 상단 고정 ${lines.length}줄`);
   return true;
 }
 
@@ -782,6 +782,8 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
 
   // ---------- 1. 그룹 미디어 등록 (비디오 우선, 없으면 이미지) ----------
   const groupImageAsset = new Map();
+  const groupTopY = new Map();   // 그룹별 미디어 상단 y (레터박스면 영상/이미지 위쪽 검정띠 끝). 0=꽉참
+  const groupClips = new Map();  // 그룹별 clip id 목록 (제목/도형을 그룹 클립에만 링크)
   let groupIdx = 0;
   const missingImg = [];
   for (const g of groups) {
@@ -869,6 +871,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       };
       pj.props.assets[aid] = { trackIds: [videoTid, audioTid], role: 'sub' };
       groupImageAsset.set(g.id, { aid, mid, fn, isVideo: true, videoTid, audioTid });
+      groupTopY.set(g.id, _vMismatch ? _vy : 0); // 레터박스면 영상 상단 y(검정띠 끝)
       mediaZip.push({ src: g.videoPath, name: fn });
       groupIdx++;
       continue;
@@ -930,6 +933,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
     pj.props.tracks[tid] = track;
     pj.props.assets[aid] = { trackIds: [tid], role: 'sub' };
     groupImageAsset.set(g.id, { aid, mid, fn });
+    groupTopY.set(g.id, track.yPos || 0); // 레터박스면 이미지 상단 y(검정띠 끝)
     mediaZip.push({ src: g.imagePath, name: fn });
     groupIdx++;
   }
@@ -1080,9 +1084,12 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
         assetIds: [],
       });
 
+      const _clipId = sid();
+      if (!groupClips.has(s.groupId)) groupClips.set(s.groupId, []);
+      groupClips.get(s.groupId).push(_clipId);
       pj.transcript.clips.push({
         sceneId: unifiedSceneId,
-        id: sid(),
+        id: _clipId,
         captionMode: 'MANUAL',
         words: wordsArr,
         // captions 마다 style 직접 박아 자막 위치(yOffset 등) 영구 보존
@@ -1132,17 +1139,29 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
     }
   }
 
-  // ---------- 2.45. 제목 배경 도형 + 제목(훅) 상단 고정 ----------
+  // ---------- 2.45. 제목 배경 도형 + 제목(훅) — 그룹별 위치 최적화 ----------
+  // 그룹 미디어가 레터박스(상단 검정띠 있음)면, 제목+도형을 그 검정띠 가운데로 내림.
+  // 9:16 꽉찬 미디어/미디어없음이면 기존처럼 맨 위. 그룹마다 따로 트랙 생성(각자 최적 위치).
   if (opts.title && (opts.title.line1 || opts.title.line2)) {
-    // 도형 먼저(아래) → 제목 텍스트(위)
-    if (opts.titleBg && opts.titleBg.enabled) {
-      try {
-        const tinfo = { line1: opts.title.line1, line2: opts.title.line2, t1Size: opts.title.l1 && opts.title.l1.size, t2Size: opts.title.l2 && opts.title.l2.size };
-        addShapeTrack(pj, opts.titleBg, tinfo, _frameRatio, mediaZip, log);
-      } catch (e) { log(`[Vrew] 제목 배경 도형 실패: ${e.message}`); }
+    const tinfo = { line1: opts.title.line1, line2: opts.title.line2, t1Size: opts.title.l1 && opts.title.l1.size, t2Size: opts.title.l2 && opts.title.l2.size };
+    const TITLE_BLOCK_H = 0.203; // 도형(=제목블록) 높이
+    let shiftedCount = 0;
+    for (const g of groups) {
+      const clipIds = groupClips.get(g.id);
+      if (!clipIds || !clipIds.length) continue;
+      const topY = groupTopY.get(g.id) || 0;
+      // 레터박스(상단띠 > 블록보다 충분히 큼)면 띠 가운데로 내림, 아니면 0
+      let yShift = 0;
+      if (topY > TITLE_BLOCK_H + 0.02) { yShift = (topY - TITLE_BLOCK_H) / 2 - 0.012; if (yShift < 0) yShift = 0; }
+      if (yShift > 0) shiftedCount++;
+      if (opts.titleBg && opts.titleBg.enabled) {
+        try { addShapeTrack(pj, opts.titleBg, tinfo, _frameRatio, mediaZip, log, clipIds, yShift); }
+        catch (e) { log(`[Vrew] 제목 배경 도형 실패(G${g.num}): ${e.message}`); }
+      }
+      try { addTitleTrack(pj, opts.title, _frameRatio, log, clipIds, yShift); }
+      catch (e) { log(`[Vrew] 제목 트랙 실패(G${g.num}): ${e.message}`); }
     }
-    try { addTitleTrack(pj, opts.title, _frameRatio, log); }
-    catch (e) { log(`[Vrew] 제목 트랙 실패: ${e.message}`); }
+    log(`[Vrew] 제목 그룹별 배치 — ${groups.length}개 그룹 (레터박스로 내린 그룹 ${shiftedCount}개)`);
   }
 
   // ---------- 2.5. AI 고지 자막 (web 트랙) ----------
