@@ -17,6 +17,18 @@
   → grok-engine 폴링을 **다운로드 버튼 비의존**으로 변경: 실제 https videoUrl + 비디오 ready(readyState≥2 & dur>1)가
   **2회 연속(≈10초 안정)** 잡히면 즉시 URL 직접 다운로드. 다운로드 버튼은 blob/실패 시 폴백으로만 사용.
 
+## 최근 기능 추가 (2026-06-17, v0.1.5)
+- **도형 위치·크기 고정**: vrew-builder `addShapeTrack` 폰트기반 계산 제거 → 사용자 .vrew 분석값 고정
+  (xPos 0 / yPos 0.012 / width 1 / height 0.203). 배경 도형 **기본 ON**(parser `proj.bgEnabled=true`).
+- **그룹 합치기**(`P.mergeGroupsByTts`, IPC `merge-groups`, UI 🔗합치기): TTS 후 앞에서부터 연속 그룹의
+  TTS합이 **8.0초 넘지 않는 선까지** 한 그룹으로 통합(문장 통합, 첫 그룹 프롬프트만 임시 보존, 경로 비움).
+  워크플로우: TTS → 합치기 → 내보내기/가져오기로 프롬프트 생성 → 이미지.
+- **이미지 프롬프트 내보내기/가져오기/API**(`core/prompt-io.js`, IPC export-prompts/import-prompts/
+  generate-prompts-api, UI 📤내보내기·📥가져오기+모달): PrimingFlow 포팅. 편-그룹 복합 라벨 `## [쇼츠-그룹]`로
+  3편 한 번에. 안전치환(PROMPT_SAFE_RULES) 포함. API는 secret-store 키(gemini/claude/openai).
+- ⏭ **미완(F2)**: 속도 → Vrew 배속(기본 1.15) + TTS 정속. 정확한 playbackRate 필드 위해 사용자가
+  Vrew에서 배속 1.15 설정·저장한 .vrew 샘플 제공 후 구현 예정(자막위치·도형과 동일한 역공학 방식).
+
 ## PrimingFlow와의 관계 (중요)
 - 엔진(flow/genspark/grok-engine, vrew-builder, tts, video-renderer, anti-detect, project-model)은
   `D:\PrimingFlow\rebuild` 에서 **복사**해 사용. 수정 시 원본과 갈라짐을 인지할 것.

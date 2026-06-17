@@ -173,7 +173,10 @@
 <div id="capbar">
   <span id="ftitle" class="meta"></span>
   <span class="grow"></span>
-  <span class="caplbl">📝 자막</span>
+  <button id="mergeBtn" class="ghost" title="TTS 후 8초 미만 그룹들을 한 그룹으로 합치기">🔗 합치기</button>
+  <button id="exportPromptsBtn" class="ghost" title="그룹별 대본 요청서를 클립보드에 복사 → 웹 LLM(claude.ai 등)에 붙여넣기">📤 내보내기</button>
+  <button id="importPromptsBtn" class="ghost" title="웹 LLM이 만든 영어 프롬프트를 붙여넣거나 API로 자동작성 → 그룹에 저장">📥 가져오기</button>
+  <span class="caplbl" style="margin-left:10px">📝 자막</span>
   크기 <select id="capSize">
     <option>25</option><option>50</option><option>75</option><option selected>90</option><option>100</option>
     <option>110</option><option>125</option><option>150</option><option>200</option><option>250</option><option>300</option>
@@ -221,6 +224,19 @@
   <div class="frow"><label>Gemini 키</label><input id="chGemini" placeholder="제미나이 음성용 API 키 (GPU 없는 PC에서 사용 · gemini 엔진 공용)"></div>
   <div class="frow chk"><label>AI 고지</label><input id="chAiNotice" type="checkbox" style="flex:0 0 auto;width:auto"> <span class="meta">영상에 "AI 제작" 자막 표시</span></div>
   <div class="mbtns"><button id="chSave">저장</button><button id="chCancel" class="ghost">취소</button></div>
+</div></div>
+
+<div id="impmodal" class="modal-bg"><div class="modal-card" style="max-width:680px">
+  <h3>📥 이미지 프롬프트 가져오기</h3>
+  <div class="meta" style="margin-bottom:8px">📤 내보내기로 복사한 요청서를 웹 LLM(claude.ai 등)에 붙여넣고, 받은 답변을 아래에 붙여넣으세요. 또는 API로 자동작성.</div>
+  <textarea id="impText" rows="12" placeholder="여기에 웹 LLM 답변(## [쇼츠-그룹] … 이미지: …)을 붙여넣으세요" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:12px"></textarea>
+  <div class="frow" style="margin-top:8px">
+    <label>API 자동작성</label>
+    <select id="impProvider" style="flex:0 0 110px;padding:6px"><option value="gemini">Gemini</option><option value="claude">Claude</option><option value="openai">OpenAI</option></select>
+    <button id="impApiBtn" class="ghost" title="등록된 API 키로 프롬프트를 한 번에 자동 작성(과금 주의)">🤖 API로 자동작성</button>
+    <span class="meta" style="flex:1">키는 ⚙ 채널편집에서 등록(현재 Gemini 지원)</span>
+  </div>
+  <div class="mbtns"><button id="impApply">붙여넣은 텍스트 적용</button><button id="impCancel" class="ghost">닫기</button></div>
 </div></div>
 
 <script>
@@ -585,6 +601,47 @@ $('#chSave').onclick = async ()=>{
 
 // 로그창 접기/펼치기 (바 클릭)
 $('#logbar').onclick = (e)=>{ if(e.target.tagName==='BUTTON') return; $('#logwrap').classList.toggle('collapsed'); };
+
+// ── 그룹 합치기 (TTS 후 8초 미만 묶기) ──
+$('#mergeBtn').onclick = async ()=>{
+  if(!DTO){ setStatus('대본을 먼저 여세요'); return; }
+  setStatus('그룹 합치는 중…');
+  try{ DTO = await window.api.mergeGroups({}); renderCards(); setStatus('그룹 합치기 완료'); }
+  catch(e){ logline('합치기 오류: '+e.message); setStatus('합치기 실패'); }
+};
+
+// ── 이미지 프롬프트 내보내기 (클립보드 복사) ──
+function _styleName(){ const s=$('#styleSel'); return (s && s.selectedOptions[0]) ? s.selectedOptions[0].textContent : ''; }
+$('#exportPromptsBtn').onclick = async ()=>{
+  if(!DTO){ setStatus('대본을 먼저 여세요'); return; }
+  try{
+    const text = await window.api.exportPrompts({ styleName: _styleName() });
+    let ok=false;
+    try{ await navigator.clipboard.writeText(text); ok=true; }
+    catch(_){ try{ const ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); ok=true; }catch(_){} }
+    setStatus(ok ? '📤 요청서 클립보드 복사 완료 — 웹 LLM에 붙여넣으세요' : '복사 실패');
+  }catch(e){ logline('내보내기 오류: '+e.message); }
+};
+
+// ── 가져오기 모달 ──
+$('#importPromptsBtn').onclick = ()=>{ if(!DTO){ setStatus('대본을 먼저 여세요'); return; } $('#impText').value=''; $('#impmodal').classList.add('show'); };
+$('#impCancel').onclick = ()=> $('#impmodal').classList.remove('show');
+$('#impmodal').onclick = (e)=>{ if(e.target.id==='impmodal') $('#impmodal').classList.remove('show'); };
+$('#impApply').onclick = async ()=>{
+  const text = $('#impText').value;
+  if(!text.trim()){ setStatus('붙여넣은 텍스트가 없습니다'); return; }
+  setStatus('가져오기 적용 중…');
+  try{ DTO = await window.api.importPrompts({ text }); renderCards(); $('#impmodal').classList.remove('show'); setStatus('가져오기 완료'); }
+  catch(e){ logline('가져오기 오류: '+e.message); setStatus('가져오기 실패'); }
+};
+$('#impApiBtn').onclick = async ()=>{
+  const provider = $('#impProvider').value;
+  setStatus(`🤖 ${provider} API로 프롬프트 작성 중…`);
+  $('#impApiBtn').disabled=true;
+  try{ DTO = await window.api.generatePromptsApi({ provider, styleName: _styleName() }); renderCards(); $('#impmodal').classList.remove('show'); setStatus('API 자동작성 완료'); }
+  catch(e){ logline('API 오류: '+e.message); setStatus('API 실패'); alert('API 호출 실패:\n'+e.message); }
+  finally{ $('#impApiBtn').disabled=false; }
+};
 
 async function loadPresets(){
   const ps = await window.api.listPresets();

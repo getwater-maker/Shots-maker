@@ -472,15 +472,10 @@ function addShapeTrack(pj, bg, t, frameRatio, mediaZip, log) {
   pj.files.push({ version: 1, mediaId: mid, sourceOrigin: 'USER', fileSize: fs.statSync(SHAPE_VBIN).size, name: `${mid}.xml`, type: 'Svg', fileLocation: 'IN_MEMORY' });
   mediaZip.push({ src: SHAPE_VBIN, name: `${mid}.vbin` });
 
-  const has2 = !!(t && String(t.line2 || '').trim());
-  const t1 = Number(t && t.t1Size) || 120, t2 = Number(t && t.t2Size) || 120;
-  const len = (s) => { const m = String(s || '').match(/[가-힣A-Za-z0-9]/g); return m ? m.length : 0; };
-  // 세로: 제목 윗줄(0.035) 위 ~ 아랫줄 아래 (텍스트 크기에 따라 가변)
+  // 도형 위치·크기 고정 — 사용자 .vrew 분석값으로 고정(폰트/줄수와 무관하게 항상 동일).
+  //   xPos 0(좌측 끝), yPos 0.012(상단), width 1(전체 폭), height 0.203.
   const yTop = 0.012;
-  const lastY = has2 ? 0.115 : 0.035;
-  const lastSize = has2 ? t2 : t1;
-  const height = Math.max(0.06, (lastY + (lastSize / 90) * 0.075) - yTop);
-  // 가로: 영상 전체 폭 (사용자 요구 — 화면 가로 전체에 걸침)
+  const height = 0.203;
   const width = 1;
   const xPos = 0;
 

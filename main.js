@@ -564,6 +564,70 @@ ipcMain.handle('regen-group', async (_e, args = {}) => {
   return P.toDTO(S.parsed);
 });
 
+// ── 이미지 프롬프트 내보내기/가져오기/API (prompt-io) ──────────────
+const PromptIO = require('./core/prompt-io');
+
+// 내보내기 — 그룹별 대본 요청서 텍스트 생성(렌더러가 클립보드 복사)
+ipcMain.handle('export-prompts', (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const { styleName = '' } = args;
+  const text = PromptIO.buildPromptRequestText(S.parsed.projects, { styleName });
+  log('📤 이미지 프롬프트 요청서 생성 — 웹 LLM(claude.ai 등)에 붙여넣으세요');
+  return text;
+});
+
+// 가져오기 — 웹 LLM 답변 텍스트 파싱 → 그룹 프롬프트 매핑
+ipcMain.handle('import-prompts', (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const text = String((args && args.text) || '');
+  if (!text.trim()) { log('가져올 텍스트가 비어 있습니다'); return P.toDTO(S.parsed); }
+  const r = PromptIO.applyPromptsToProjects(S.parsed.projects, text);
+  if (r.groups > 0) {
+    log(`📥 가져오기 적용 — ${r.groups}개 그룹 (🖼 이미지 ${r.img} · 🎬 영상 ${r.vid})`);
+    if (r.sanitized.length) { log(`🛡 안전 치환 ${r.sanitized.length}건:`); r.sanitized.slice(0, 30).forEach((l) => log('   ' + l)); }
+  } else {
+    log('⚠ 인식된 프롬프트가 없습니다 — 답변에 `## [쇼츠-그룹]` 헤더가 그대로 있는지 확인하세요');
+  }
+  return P.toDTO(S.parsed);
+});
+
+// API 자동작성 — 등록된 LLM 키로 한 번에 프롬프트 작성 → 매핑
+ipcMain.handle('generate-prompts-api', async (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const { provider = 'gemini', styleName = '' } = args;
+  let key = '';
+  try { const s = require('./tts/secret-store').get(provider); key = (s && s.key) || ''; } catch {}
+  if (!key.trim()) throw new Error(`${provider.toUpperCase()} API 키가 없습니다 — ⚙ 채널편집에서 키를 등록하세요(현재 Gemini 키 입력 지원).`);
+  const reqText = PromptIO.buildPromptRequestText(S.parsed.projects, { styleName });
+  log(`🤖 [${provider}] API 프롬프트 자동 작성 시작 (${PromptIO.LLM_TEXT_MODELS[provider]})…`);
+  const answer = await PromptIO.callLlmTextApi(provider, key, reqText);
+  const r = PromptIO.applyPromptsToProjects(S.parsed.projects, answer);
+  if (r.groups > 0) {
+    log(`📥 [${provider}] 적용 — ${r.groups}개 그룹 (🖼 ${r.img} · 🎬 ${r.vid})`);
+    if (r.sanitized.length) { log(`🛡 안전 치환 ${r.sanitized.length}건`); }
+  } else {
+    log(`⚠ [${provider}] 응답에서 프롬프트를 인식하지 못했습니다`);
+  }
+  return P.toDTO(S.parsed);
+});
+
+// 그룹 합치기 — TTS 시간 8초 미만 그룹들을 한 그룹으로 묶음 (TTS 변환 후 사용)
+ipcMain.handle('merge-groups', (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const { shortsNum = null } = args;
+  let total = 0, done = 0;
+  for (const pr of S.parsed.projects) {
+    if (shortsNum && pr.shortsNum !== shortsNum) continue;
+    const hasTts = pr.sentences.some((s) => s.ttsDurationSec != null);
+    if (!hasTts) { log(`쇼츠${pr.shortsNum}: TTS를 먼저 변환하세요 (시간 정보 없음)`); continue; }
+    const r = P.mergeGroupsByTts(pr, 8.0);
+    log(`🔗 쇼츠${pr.shortsNum} 그룹 합치기: ${r.before}개 → ${r.after}개 (${r.merged}개 감소, 각 ≤8.0초)`);
+    total += r.merged; done++;
+  }
+  if (!done) log('합칠 대상이 없습니다 — TTS 변환을 먼저 하세요.');
+  return P.toDTO(S.parsed);
+});
+
 ipcMain.handle('set-aspect', (_e, value) => {
   if (!S.parsed) return null;
   const a = (value === '1:1') ? '1:1' : '9:16';

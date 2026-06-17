@@ -280,6 +280,43 @@ async function generateHookVideosGrok(project, videoDir, logger, abortSignal, vi
   return results;
 }
 
+// ── 그룹 합치기 (TTS 시간 8초 미만 묶기) ────────────────
+// TTS 변환 후 호출. 앞에서부터 연속 그룹을 누적해 합이 maxSec(8.0)을 넘지 않는 선까지 한 그룹으로 합침.
+// 절대 maxSec 를 초과하지 않음(문장 단위라 정확히 8.0은 못 맞춰도 근처). 한 그룹이 이미 ≥maxSec 면 단독 유지.
+// 합쳐진 그룹은 문장을 모두 합치고, 이미지/영상 프롬프트·경로는 비움(합친 뒤 내보내기/가져오기로 새로 만듦).
+function mergeGroupsByTts(project, maxSec = 8.0) {
+  const { Group, finalizeGroupIds } = require('./project-model');
+  const groups = project.groups;
+  if (!groups || groups.length < 2) return { before: groups ? groups.length : 0, after: groups ? groups.length : 0, merged: 0 };
+  const durOf = (g) => project.getSentencesOfGroup(g).reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
+
+  const buckets = [];
+  let cur = null, curDur = 0;
+  for (const g of groups) {
+    const d = durOf(g);
+    if (cur && (curDur + d) <= maxSec + 1e-6) { cur.push(g); curDur += d; }
+    else { cur = [g]; curDur = d; buckets.push(cur); }
+  }
+
+  const newGroups = buckets.map((bucket, i) => {
+    const first = bucket[0];
+    const ng = new Group({ num: i + 1, sentenceIds: bucket.flatMap((g) => g.sentenceIds) });
+    ng.phase = first.phase || null;
+    ng.title = first.title || null;
+    ng.mode = first.mode || (first.isI2V ? 'i2v' : 'motion');
+    ng.isI2V = !!first.isI2V;
+    // 합친 뒤 새 프롬프트를 만들 것이므로 첫 그룹의 프롬프트만 임시 보존(없으면 null). 경로는 비움.
+    ng.imagePrompt = bucket.map((g) => g.imagePrompt).find((p) => p && p.trim()) || null;
+    ng.videoPrompt = bucket.map((g) => g.videoPrompt).find((p) => p && p.trim()) || null;
+    ng.motionNote = bucket.map((g) => g.motionNote).find((p) => p && p.trim()) || null;
+    return ng;
+  });
+
+  project.groups = newGroups;
+  finalizeGroupIds(newGroups, project.sentences); // sentence.groupId 재지정 + 안정 id
+  return { before: groups.length, after: newGroups.length, merged: groups.length - newGroups.length };
+}
+
 // ── SRT 자막 파일 (subtitles 폴더용) ────────────────────
 function _fmtSrt(t) {
   const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = Math.floor(t % 60);
@@ -318,4 +355,5 @@ module.exports = {
   parseScript, toDTO, getPreset, listPresets,
   makeTtsManager, fillTts, fillSilent, buildProjectVrew, sanitize,
   generateImages, generateImagesGenspark, generateHookVideosGrok, writeSrt,
+  mergeGroupsByTts,
 };

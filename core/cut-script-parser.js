@@ -263,6 +263,7 @@ function parseCutScript(text) {
     proj.fileTitle = fileTitle;
     proj.voice = meta.voice;
     proj.format = isGrouped ? 'grouped' : 'cut';
+    proj.bgEnabled = true; // 제목 배경 도형 기본 포함(사용자 요구). 체크 해제로 끌 수 있음.
     return proj;
   });
 
