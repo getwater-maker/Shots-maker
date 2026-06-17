@@ -68,7 +68,10 @@ for (const f of files) {
     pr.groups.forEach((g, gi) => {
       const sents = pr.getSentencesOfGroup(g);
       ok(sents.length >= 1 && sents.every((s) => s.text && s.text.length > 0), `${f} 쇼츠${idx + 1} 그룹${gi + 1}: 문장 존재`);
-      ok(g.imagePrompt && g.imagePrompt.length > 10, `${f} 쇼츠${idx + 1} 그룹${gi + 1}: imagePrompt 존재`);
+      // prose(줄글) 형식은 이미지 프롬프트가 없음 — 내보내기/가져오기로 생성하므로 단언 생략
+      if (res.format !== 'prose') {
+        ok(g.imagePrompt && g.imagePrompt.length > 10, `${f} 쇼츠${idx + 1} 그룹${gi + 1}: imagePrompt 존재`);
+      }
       // 신규형식이면 I2V 그룹은 videoPrompt 보유해야 함
       if (res.format === 'grouped' && g.isI2V) {
         ok(g.videoPrompt && g.videoPrompt.length > 10, `${f} 쇼츠${idx + 1} 그룹${gi + 1}: I2V videoPrompt 존재`);

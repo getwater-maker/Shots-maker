@@ -15,6 +15,17 @@
  *     - 🖼️ 이미지: `image prompt`
  *     - 🎞️ 모션: slow zoom-in + 좌→우 팬           ← 켄번스 힌트(영상 아님)
  *
+ * ▸ 줄글(prose) 형식 — 신규. 이미지 프롬프트 없음(내보내기/가져오기로 생성):
+ *     ## 쇼츠 1
+ *     제목:
+ *     제목 1줄
+ *     제목 2줄
+ *     [훅]                  ← 대괄호 = 그룹(phase)
+ *     문장1
+ *     문장2
+ *     [본론 심화]
+ *     ★CTA: …               ← 별표 라벨도 그룹 헤더
+ *
  * ▸ 구(컷) 형식 — 하위호환. 컷=문장=그룹 1:1:1:
  *     ① (훅) 나레이션
  *        `image prompt`
@@ -44,6 +55,11 @@ const backtick = (t) => { const m = t.match(/`([^`]+)`/); return m ? m[1].trim()
 const CUTLIST_HEADER_RE = /^\s*-\s*컷\s*리스트/;
 const CUT_RE = /^\s*([①-⑳])\s*(?:\(([^)]*)\))?\s*(.+?)\s*$/;
 const PROMPT_LINE_RE = /^\s*`(.+)`\s*$/;
+
+// ── 줄글(prose) 형식 ────────────────────────────────────
+// `제목:` 2줄 + `[단계]` 그룹 헤더 + 그 아래 문장들 (이미지 프롬프트 없음 → 내보내기/가져오기로 생성).
+const PROSE_BRACKET_RE = /^\s*\[([^\]]+)\]\s*$/;        // [훅], [본론 심화], [재훅 / 방향전환] …
+const TITLE_LABEL_RE = /^\s*제목\s*[:：]\s*(.*)$/;
 
 function circledToInt(ch) {
   if (!ch) return null;
@@ -219,12 +235,57 @@ function buildProjectModel(cuts) {
   return { sentences, groups };
 }
 
+// ── 줄글(prose) 블록 파서 ───────────────────────────────
+// `제목:` 다음 줄들 = 제목(최대 2줄). `[단계]` = 그룹(phase). 그 아래 각 줄 = 문장.
+// 이미지 프롬프트는 없음(나중에 내보내기/가져오기/API로 생성).
+function parseShortsBlockProse(lines) {
+  const groups = [];
+  let cur = null;
+  const titleLines = [];
+  let inTitle = false;
+  let hookCaption = null;
+
+  for (const raw of lines) {
+    const t = raw.trim();
+    if (!t) { inTitle = false; continue; }              // 빈 줄 = 제목 수집 종료
+
+    const hm = raw.match(HOOK_RE);                       // - 훅 자막(첫 프레임): … (있으면)
+    if (hm) { hookCaption = hm[1].trim(); inTitle = false; continue; }
+
+    const tm = t.match(TITLE_LABEL_RE);                  // 제목:
+    if (tm) { inTitle = true; if (tm[1]) titleLines.push(tm[1].trim()); continue; }
+
+    const bm = t.match(PROSE_BRACKET_RE);                // [단계] = 그룹 헤더
+    if (bm) { inTitle = false; cur = { num: groups.length + 1, phase: bm[1].trim(), sentences: [] }; groups.push(cur); continue; }
+
+    // ★CTA: 같은 별표 라벨 = 새 그룹 헤더 (phase=라벨, 같은 줄 뒤 텍스트는 첫 문장)
+    if (t.startsWith('★')) {
+      const sm = t.match(/^★+\s*([^:：]+?)\s*[:：]\s*(.*)$/);
+      const phase = sm ? sm[1].trim() : t.replace(/^★+\s*/, '').trim();
+      inTitle = false; cur = { num: groups.length + 1, phase, sentences: [] }; groups.push(cur);
+      if (sm && sm[2] && sm[2].trim()) cur.sentences.push(sm[2].trim());
+      continue;
+    }
+
+    if (inTitle) { titleLines.push(t); continue; }       // 제목 줄
+    if (cur) cur.sentences.push(t);                      // 일반 문장 → 현재 그룹
+  }
+
+  const titleLine1 = titleLines[0] || null;
+  const titleLine2 = titleLines[1] || null;
+  if (!hookCaption) hookCaption = [titleLine1, titleLine2].filter(Boolean).join(' ') || null;
+  return { titleLine1, titleLine2, hookCaption, groups: groups.filter((g) => g.sentences.length) };
+}
+
 // ── 메인 ────────────────────────────────────────────────
 function parseCutScript(text) {
   const lines = String(text == null ? '' : text).replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
 
-  // 형식 감지: '음성/자막' 또는 '** … 그룹 N' 이 있으면 신규(그룹) 형식.
+  // 형식 감지: grouped(음성/자막·**그룹N) / cut(①②③) / prose(제목: + [단계] 줄글).
   const isGrouped = /(^|\n)\s*-\s*음성\s*\/\s*자막\s*:/.test(text) || /\*\*[^\n]*그룹\s*\d/.test(text);
+  const hasCut = /(^|\n)\s*[①-⑳]/.test(text);
+  const hasProse = /(^|\n)\s*\[[^\n\]]+\]\s*(\n|$)/.test(text) && /(^|\n)\s*제목\s*[:：]/.test(text);
+  const format = isGrouped ? 'grouped' : (hasCut ? 'cut' : (hasProse ? 'prose' : 'cut'));
 
   let fileTitle = '';
   let meta = { raw: '', voice: null, aspect: '9:16' };
@@ -245,11 +306,15 @@ function parseCutScript(text) {
   }
 
   const projects = blocks.map((blk) => {
-    let hookCaption, model;
-    if (isGrouped) {
+    let hookCaption, model, titleLine1 = null, titleLine2 = null;
+    if (format === 'grouped') {
       const r = parseShortsBlockGrouped(blk.lines);
       hookCaption = r.hookCaption;
       model = buildProjectModelGrouped(r.groups);
+    } else if (format === 'prose') {
+      const r = parseShortsBlockProse(blk.lines);
+      hookCaption = r.hookCaption; titleLine1 = r.titleLine1; titleLine2 = r.titleLine2;
+      model = buildProjectModelGrouped(r.groups); // [단계]=그룹, 그 아래 줄=문장 (다중문장 그룹)
     } else {
       const r = parseShortsBlock(blk.lines);
       hookCaption = r.hookCaption;
@@ -260,14 +325,16 @@ function parseCutScript(text) {
     proj.title = blk.heading;
     proj.shortsNum = blk.num;
     proj.hookCaption = hookCaption;
+    if (titleLine1 != null) proj.titleLine1 = titleLine1;
+    if (titleLine2 != null) proj.titleLine2 = titleLine2;
     proj.fileTitle = fileTitle;
     proj.voice = meta.voice;
-    proj.format = isGrouped ? 'grouped' : 'cut';
+    proj.format = format;
     proj.bgEnabled = true; // 제목 배경 도형 기본 포함(사용자 요구). 체크 해제로 끌 수 있음.
     return proj;
   });
 
-  return { fileTitle, meta, projects, format: isGrouped ? 'grouped' : 'cut' };
+  return { fileTitle, meta, projects, format };
 }
 
 function parseCutScriptFile(filePath) {

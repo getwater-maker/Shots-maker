@@ -31,6 +31,13 @@
   fillTts 합성 speed=1.0 고정, capbar '속도'→'Vrew배속'(기본 1.15), export-vrew/make-all 의 speed →
   buildProjectVrew(playbackRate) → buildVrew opts.playbackRate. 검증: word 1.15 / ttsClip 1 일치.
 
+## 줄글(prose) 대본 형식 추가 (2026-06-17, v0.1.8)
+- 신규 3번째 형식: `## 쇼츠 N` 안에 `제목:`(2줄) + `[훅]`/`[본론 심화]`/`[CTA]` 같은 **대괄호 그룹 헤더** + 그 아래 줄들=문장.
+  `★CTA:` 같은 별표 라벨도 그룹 헤더로 인식. **이미지 프롬프트 없음** → TTS→합치기→내보내기/가져오기로 프롬프트 생성.
+- 파서: `parseShortsBlockProse` + `buildProjectModelGrouped` 재사용. 감지 `format='prose'`(① 없고 `[..]`+`제목:` 있으면).
+  proj.titleLine1/2 자동 세팅. 검증: 0617 파일 = prose 3편·6그룹·16/17/15문장, 회귀 407단언 통과.
+- 테스트: prose 는 imagePrompt 단언 생략(없는 게 정상).
+
 ## Flow 이미지+영상 통합 (2026-06-17, v0.1.7 — i2v 첨부는 반복 보정 중)
 - 이미지 엔진 select=**Google Flow** 선택 시 이미지·영상 **모두 Flow**로 (Grok 대신). Genspark 선택 시 이미지=Genspark/영상=Grok 유지.
 - 엔진은 이미 이미지/동영상·비율·매수·모델(Veo) 선택 지원(`_configureSettings`/`_selectModel`/`_clickTab`). run()에
