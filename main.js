@@ -596,7 +596,12 @@ ipcMain.handle('set-title', (_e, args = {}) => {
 
 // 미리보기 오디오 — 파일을 base64 data URL 로 반환 (media:// fetch 가 렌더러에서 막히는 경우 우회)
 // 작업 중단 — generate 함수들의 abortSignal 이 S.abort 를 확인
-ipcMain.handle('abort', () => { S.abort = true; log('⏹ 중단 요청 — 현재 단계 마치는 대로 멈춥니다'); });
+ipcMain.handle('abort', () => {
+  S.abort = true;
+  // Flow 엔진은 자체 _stopped 플래그로 멈춤 — abort 시 명시적으로 stop() 호출
+  try { if (S.flowEng && typeof S.flowEng.stop === 'function') S.flowEng.stop(); } catch {}
+  log('⏹ 중단 요청 — 현재 단계 마치는 대로 멈춥니다');
+});
 
 // 초기화 — 새 대본 작업을 위해 현재 상태 비움
 ipcMain.handle('reset-project', () => {
