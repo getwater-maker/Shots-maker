@@ -163,7 +163,11 @@
     <button id="ttsAll" class="ghost" disabled>🎤 TTS</button>
     <button id="imgAll" class="ghost" disabled>🖼 이미지</button>
     <span title="만들 영상 개수(앞 그룹부터). 랜덤=쇼츠마다 무작위">🎬<select id="videoCount" style="width:62px"><option value="random" selected>랜덤</option><option>0</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></span>
-    <button id="vidAll" class="ghost" disabled title="앞에서 N개 그룹을 Grok으로 영상화">영상</button>
+    <span id="flowVidOpts" title="Flow 영상 옵션 (이미지 엔진이 Google Flow일 때 적용)" style="display:none">
+      <select id="flowVideoModel" style="width:auto" title="Flow 영상 모델"><option>Veo 3.1 - Lite</option><option>Veo 3.1 - Fast</option><option>Veo 3.1</option></select>
+      <select id="flowCount" style="width:54px" title="Flow 생성 매수"><option>1x</option><option>x2</option><option>x3</option><option>x4</option></select>
+    </span>
+    <button id="vidAll" class="ghost" disabled title="앞에서 N개 그룹을 영상화 (엔진=Flow면 Flow i2v, 아니면 Grok)">영상</button>
     <button id="makeAll" disabled title="TTS+이미지 동시 → 영상 → .vrew → 폴더열기">⚡ 만들기</button>
     <button id="abortBtn" class="ghost" title="진행 중인 작업 중단">■ 중단</button>
     <button id="vrewAll" disabled>💾 .vrew</button>
@@ -423,7 +427,8 @@ async function runBulk(shortsNum){
 async function runMake(shortsNum){
   const args={ shortsNum, engine:$('#imgEngine').value, presetName:$('#preset').value||null,
     speed:$('#ttsSpeed').value||null, captionStyle:capOverride(), captionMaxChars:capChars(),
-    styleId:$('#styleSel').value||null, videoCount:$('#videoCount').value, dry:false };
+    styleId:$('#styleSel').value||null, videoCount:$('#videoCount').value, dry:false,
+    flowVideoModel:$('#flowVideoModel').value, flowCount:$('#flowCount').value };
   setStatus('⚡ 전체 제작중… (TTS+이미지→영상→.vrew)');
   try{ DTO = await window.api.makeAll(args); renderCards(); setStatus('전체 제작 완료'); }
   catch(e){ logline('오류: '+e.message); setStatus('오류'); }
@@ -678,8 +683,9 @@ async function runImg(shortsNum){
   catch(e){ logline('오류: '+e.message); setStatus('오류'); }
 }
 async function runVid(shortsNum){
-  setStatus('영상 생성중(Grok)… 브라우저가 열립니다');
-  try{ DTO = await window.api.videoBuild({ shortsNum, videoCount: $('#videoCount').value }); renderCards(); setStatus('영상 완료'); }
+  const engine = $('#imgEngine').value === 'flow' ? 'flow' : 'grok';
+  setStatus(`영상 생성중(${engine==='flow'?'Flow i2v':'Grok'})… 브라우저가 열립니다`);
+  try{ DTO = await window.api.videoBuild({ shortsNum, videoCount: $('#videoCount').value, engine, flowVideoModel:$('#flowVideoModel').value, flowCount:$('#flowCount').value }); renderCards(); setStatus('영상 완료'); }
   catch(e){ logline('오류: '+e.message); setStatus('오류'); }
 }
 function capOverride(){
@@ -695,6 +701,9 @@ async function runVrew(shortsNum){
     setStatus(`.vrew ${r.outs.length}개`); }
   catch(e){ logline('오류: '+e.message); setStatus('오류'); }
 }
+// Flow 영상 옵션은 이미지 엔진이 Google Flow 일 때만 노출
+function _toggleFlowOpts(){ const el=$('#flowVidOpts'); if(el) el.style.display = ($('#imgEngine').value==='flow') ? 'inline' : 'none'; }
+$('#imgEngine').addEventListener('change', _toggleFlowOpts); _toggleFlowOpts();
 $('#ttsAll').onclick = ()=> runTts(null);
 $('#imgAll').onclick = ()=> runImg(null);
 $('#vidAll').onclick = ()=> runVid(null);

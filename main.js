@@ -237,6 +237,57 @@ async function runFlowImages(project, imagesDir, logger, stylePrompt) {
   try { fs.rmSync(workDir, { recursive: true, force: true }); } catch {}
 }
 
+// Flow 영상 (i2v) — 앞에서 N개 그룹의 이미지를 프레임/애셋으로 붙여 Veo 영상화. 결과 → group.videoPath.
+async function runFlowVideos(project, mediaDir, logger, opts = {}) {
+  const { videoCount = 'random', model = 'Veo 3.1 - Lite', count = 'x1' } = opts;
+  const N = resolveVideoCount(videoCount, project.groups.length);
+  if (!N) { logger('비디오 개수 0 — Flow 영상 생성 안 함'); return; }
+  const targets = project.groups.slice(0, N).filter((g) => g.imagePath && fs.existsSync(g.imagePath));
+  if (!targets.length) { logger('Flow 영상: 이미지가 있는 대상 그룹이 없음 (먼저 이미지 생성)'); return; }
+
+  const workDir = path.join(os.tmpdir(), `sm_flowv_${project.shortsNum}_${Date.now().toString(36)}`);
+  fs.mkdirSync(workDir, { recursive: true });
+  const profileDir = path.join(os.homedir(), '.flow-app', 'profiles', 'default');
+  fs.mkdirSync(profileDir, { recursive: true });
+  if (!S.flowEng) {
+    cleanChromeProfile(profileDir);
+    const { FlowAutomator } = require('./flow-engine');
+    S.flowEng = new FlowAutomator(win, profileDir);
+  }
+  const eng = S.flowEng;
+
+  const paragraphs = targets.map((g) => (project.getSentencesOfGroup(g)[0] || {}).text || `cut${g.num}`);
+  const customPrompts = targets.map((g) => g.videoPrompt || g.motionNote || 'natural slow motion, cinematic feel');
+  const frameImages = targets.map((g) => g.imagePath);
+  targets.forEach((g) => { g.videoStatus = 'generating'; });
+  pushDtoUpdate();
+  logger(`[Flow] 영상 ${targets.length}개 생성 (모델 ${model}, ${count}, i2v)…`);
+
+  const imgDir = path.join(workDir, 'images');
+  try {
+    await eng.run({
+      paragraphs, customPrompts, mediaType: 'video', model, count,
+      ratio: project.aspect || '9:16', outputDir: workDir,
+      withSubtitle: false, vrewOnly: false, frameImages,
+      antiDetect: { enabled: true, preset: '기본' }, profileId: 'default',
+    });
+  } catch (e) { logger('Flow 영상 오류: ' + e.message); }
+
+  // 출력 .mp4 → 대상 그룹 videoPath 매핑 (파일명 앞 2자리 = 순번, 폴백 순서)
+  let files = [];
+  try { files = fs.readdirSync(imgDir).filter((f) => /\.mp4$/i.test(f)).sort(); } catch {}
+  targets.forEach((g, i) => {
+    const num = String(i + 1).padStart(2, '0');
+    const f = files.find((x) => x.startsWith(num)) || files[i];
+    if (!f) { g.videoStatus = 'fail'; return; }
+    const dest = path.join(mediaDir, `${String(g.num).padStart(2, '0')}.mp4`);
+    try { fs.copyFileSync(path.join(imgDir, f), dest); g.videoPath = dest; g.videoStatus = 'done'; logger(`[Flow] G${g.num} 영상 첨부`); }
+    catch (e) { g.videoStatus = 'fail'; logger(`영상 복사 실패 G${g.num}: ${e.message}`); }
+  });
+  pushDtoUpdate();
+  try { fs.rmSync(workDir, { recursive: true, force: true }); } catch {}
+}
+
 // 워크폴더 이미지 → media-N/NN.ext 로 매핑 (이미 매핑된 그룹은 건너뜀, 멱등). 신규 매핑 수 반환.
 function mapFlowImagesOnce(project, imgDir, mediaDir, allowOrder, logger) {
   let files = [];
@@ -295,16 +346,21 @@ function resolveVideoCount(raw, groupCount) {
 
 ipcMain.handle('video-build', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { shortsNum = null, videoCount = 'random' } = args;
+  const { shortsNum = null, videoCount = 'random', engine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1' } = args;
   S.abort = false;
   for (const pr of S.parsed.projects) {
     if (shortsNum && pr.shortsNum !== shortsNum) continue;
     if (S.abort) { log('⏹ 중단됨'); break; }
-    const vc = resolveVideoCount(videoCount, pr.groups.length);
-    log(`🎬 쇼츠${pr.shortsNum} 영상 ${vc}개 생성 (Grok)…`);
+    const videoDir = shortsDirs(S.outRoot, pr.shortsNum).media; // 영상도 media-N 폴더
     try {
-      const videoDir = shortsDirs(S.outRoot, pr.shortsNum).media; // 영상도 media-N 폴더
-      await P.generateHookVideosGrok(pr, videoDir, log, () => S.abort, vc, pushDtoUpdate);
+      if (engine === 'flow') {
+        log(`🎬 쇼츠${pr.shortsNum} 영상 생성 (Flow i2v)…`);
+        await runFlowVideos(pr, videoDir, log, { videoCount, model: flowVideoModel, count: flowCount });
+      } else {
+        const vc = resolveVideoCount(videoCount, pr.groups.length);
+        log(`🎬 쇼츠${pr.shortsNum} 영상 ${vc}개 생성 (Grok)…`);
+        await P.generateHookVideosGrok(pr, videoDir, log, () => S.abort, vc, pushDtoUpdate);
+      }
       log(`✓ 쇼츠${pr.shortsNum} 영상 완료`);
     } catch (e) {
       log(`✗ 쇼츠${pr.shortsNum} 영상 실패: ${e.message}`);
@@ -478,7 +534,7 @@ ipcMain.handle('load-project', async () => {
 // ⚡ 전체 만들기 — TTS + 이미지 동시 → I2V 영상 → .vrew → 출력폴더 열기
 ipcMain.handle('make-all', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId = null, videoCount = 'random', dry = false } = args;
+  const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId = null, videoCount = 'random', dry = false, flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1' } = args;
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
   let preset = P.getPreset(presetName);
   // TTS 는 정속(1.0) — speed 값은 Vrew 배속(playbackRate)으로만 사용
@@ -503,8 +559,10 @@ ipcMain.handle('make-all', async (_e, args = {}) => {
     await Promise.allSettled([audioTask, imgTask]);
     pushDtoUpdate(); // TTS·이미지 매핑(g.imagePath) 결과를 UI 썸네일에 즉시 반영
     if (S.abort) { log('⏹ 중단됨'); break; }
-    try { await P.generateHookVideosGrok(pr, dirs.media, log, () => S.abort, resolveVideoCount(videoCount, pr.groups.length), pushDtoUpdate); }
-    catch (e) { log(`영상 실패: ${e.message}`); }
+    try {
+      if (engine === 'flow') await runFlowVideos(pr, dirs.media, log, { videoCount, model: flowVideoModel, count: flowCount });
+      else await P.generateHookVideosGrok(pr, dirs.media, log, () => S.abort, resolveVideoCount(videoCount, pr.groups.length), pushDtoUpdate);
+    } catch (e) { log(`영상 실패: ${e.message}`); }
     pushDtoUpdate(); // 생성된 영상(g.videoPath)도 UI 에 반영
     let ep = preset;
     if (ep && captionStyle) ep = { ...ep, captionStyle: { ...(ep.captionStyle || {}), ...captionStyle } };

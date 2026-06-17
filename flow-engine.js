@@ -312,6 +312,7 @@ class FlowAutomator {
       downloadResolution = '1K',
       cooldownSeconds = 60,
       characterImages = [],
+      frameImages = [],          // i2v: 영상 모드에서 각 단락의 소스 이미지를 프레임/애셋으로 첨부(길이 1:1)
       characterMap = [],
       kenburnsMode = 'uniform',
       kenburnsSpeed = 'normal',
@@ -587,7 +588,7 @@ class FlowAutomator {
       });
     } else {
       successCount = await this._runSequentialMode(paragraphs, prompts, imgDir, {
-        mediaType, ratio, model, count, withSubtitle, humanizedTyping, typingSpeed, downloadResolution,
+        mediaType, ratio, model, count, withSubtitle, humanizedTyping, typingSpeed, downloadResolution, frameImages,
       });
     }
 
@@ -762,6 +763,11 @@ class FlowAutomator {
         if (!settingsConfigured) {
           await this._configureSettings(opts);
           settingsConfigured = true;
+        }
+
+        // i2v: 영상 모드에서 이 단락의 소스 이미지를 프레임/애셋으로 첨부 (단락마다)
+        if (opts.mediaType === 'video' && opts.frameImages && opts.frameImages[i]) {
+          await this._attachFrameImage(opts.frameImages[i], num);
         }
 
         // 동영상 모드: 네트워크 캡처 시작
@@ -1564,6 +1570,67 @@ class FlowAutomator {
       this.log(`  [고해상도] 실패: ${err.message}`);
     }
     return null;
+  }
+
+  // ─── i2v: 영상 모드에서 소스 이미지를 '프레임/애셋'으로 첨부 ───
+  // best-effort 셀렉터 + 상세 로그/덤프 — 실제 Flow 영상 UI 로그를 보고 정확히 고정 예정.
+  async _attachFrameImage(imagePath, num) {
+    try {
+      if (!imagePath || !fs.existsSync(imagePath)) { this.log(`  [i2v ${num}] 소스 이미지 없음: ${imagePath}`); return false; }
+      this.log(`  [i2v ${num}] 프레임 이미지 첨부 시도: ${path.basename(imagePath)}`);
+
+      // 1) '프레임/애셋' 추가 컨트롤 클릭 (best-effort — 텍스트/aria 기반)
+      const triggers = ['프레임', '애셋', '에셋', 'Frame', 'Asset', '이미지 추가', '추가', 'Add'];
+      let clicked = false;
+      for (const t of triggers) {
+        try {
+          const btn = this.page.getByRole('button', { name: t, exact: false }).first();
+          if (await btn.isVisible({ timeout: 500 })) { await btn.click({ timeout: 1500 }); clicked = true; this.log(`  [i2v ${num}] '${t}' 컨트롤 클릭`); break; }
+        } catch (_) {}
+      }
+      await this.page.waitForTimeout(400);
+
+      // 2) 파일 input 에 이미지 설정 (hidden input 직접 — 대화상자 회피)
+      let set = false;
+      try {
+        const inputs = await this.page.$$('input[type="file"]');
+        for (const inp of inputs) {
+          try {
+            const accept = (await inp.getAttribute('accept')) || '';
+            if (accept && !/image/i.test(accept)) continue;
+            await this.page.evaluate((el) => { el.style.cssText = 'display:block !important; opacity:1; position:fixed; top:0; left:0; z-index:99999;'; }, inp);
+            await inp.setInputFiles(imagePath);
+            set = true; this.log(`  [i2v ${num}] 파일 input 업로드 ✓ (accept="${accept}")`); break;
+          } catch (_) {}
+        }
+      } catch (_) {}
+
+      if (!set) {
+        this.log(`  [i2v ${num}] ⚠ 프레임 첨부 실패(트리거클릭=${clicked}) — UI 후보 덤프(이 목록에서 '애셋/프레임 추가' 항목을 알려주시면 정확히 고정):`);
+        await this._dumpFrameAttachUI();
+        return false;
+      }
+      await this.page.waitForTimeout(1500); // 업로드 반영 대기
+      this.log(`  [i2v ${num}] 프레임 첨부 완료`);
+      return true;
+    } catch (e) { this.log(`  [i2v ${num}] 첨부 예외: ${e.message}`); return false; }
+  }
+
+  // i2v 첨부 UI 진단 — 버튼/입력 후보를 로그로 남겨 셀렉터 고정에 사용
+  async _dumpFrameAttachUI() {
+    try {
+      const info = await this.page.evaluate(() => {
+        const out = [];
+        let i = 0;
+        document.querySelectorAll('button, [role="button"], input[type="file"], [aria-label]').forEach((el) => {
+          if (i++ > 80) return;
+          const t = (el.innerText || el.getAttribute('aria-label') || el.getAttribute('accept') || '').trim().replace(/\s+/g, ' ').slice(0, 50);
+          if (t) out.push(`${el.tagName.toLowerCase()}${el.type ? '[' + el.type + ']' : ''}: ${t}`);
+        });
+        return [...new Set(out)];
+      });
+      info.slice(0, 45).forEach((l) => this.log('    ' + l));
+    } catch (e) { this.log('  [i2v DUMP] 실패: ' + e.message); }
   }
 
   // ─── v2.0: 캐릭터 참조 이미지 업로드 ───

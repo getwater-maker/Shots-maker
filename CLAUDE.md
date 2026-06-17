@@ -31,6 +31,17 @@
   fillTts 합성 speed=1.0 고정, capbar '속도'→'Vrew배속'(기본 1.15), export-vrew/make-all 의 speed →
   buildProjectVrew(playbackRate) → buildVrew opts.playbackRate. 검증: word 1.15 / ttsClip 1 일치.
 
+## Flow 이미지+영상 통합 (2026-06-17, v0.1.7 — i2v 첨부는 반복 보정 중)
+- 이미지 엔진 select=**Google Flow** 선택 시 이미지·영상 **모두 Flow**로 (Grok 대신). Genspark 선택 시 이미지=Genspark/영상=Grok 유지.
+- 엔진은 이미 이미지/동영상·비율·매수·모델(Veo) 선택 지원(`_configureSettings`/`_selectModel`/`_clickTab`). run()에
+  **`frameImages` 옵션** 추가 → 영상 모드에서 단락마다 소스 이미지를 프레임/애셋으로 첨부(i2v).
+- 신규 `_attachFrameImage(imagePath,num)`(flow-engine): **best-effort** 셀렉터(프레임/애셋 버튼+`input[type=file]`)
+  + 실패 시 `_dumpFrameAttachUI()`로 버튼/입력 후보 로그 → **실제 로그 보고 셀렉터 고정 예정**(Grok/자막과 동일 반복법).
+- main `runFlowVideos(project,mediaDir,logger,{videoCount,model,count})`: 앞 N개(이미지 있는) 그룹 → eng.run(video,
+  frameImages) → 출력 .mp4 매핑. video-build/make-all 이 engine==='flow'면 이 경로, 아니면 Grok.
+- UI: 헤더에 `#flowVideoModel`(Veo 3.1 Lite/Fast/3.1)·`#flowCount`(1x~4x) — 엔진=Flow일 때만 노출(`_toggleFlowOpts`).
+- ⏳ **검증 필요**: 실제 Flow 영상 UI에서 프레임/애셋 첨부 셀렉터. 사용자가 한 번 돌려 `[i2v DUMP]` 로그 주면 고정.
+
 ## PrimingFlow와의 관계 (중요)
 - 엔진(flow/genspark/grok-engine, vrew-builder, tts, video-renderer, anti-detect, project-model)은
   `D:\PrimingFlow\rebuild` 에서 **복사**해 사용. 수정 시 원본과 갈라짐을 인지할 것.
