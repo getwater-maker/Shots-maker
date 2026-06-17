@@ -793,6 +793,9 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       const _vmeta0 = readMp4VideoMeta(g.videoPath);
       const _vertical = _vmeta0 ? (_vmeta0.height > _vmeta0.width) : false;
       const _useVideo = (_aspect !== '9:16') || _vertical;
+      if (!_useVideo) {
+        log(`[Vrew] ⚠ G${g.num} 영상 제외 — ${_vmeta0 ? `가로 영상 ${_vmeta0.width}x${_vmeta0.height}` : 'mp4 메타 읽기 실패'} (9:16 캔버스엔 세로 영상 필요). Flow/Grok 을 9:16으로 만들어야 .vrew 에 들어갑니다.`);
+      }
       if (_useVideo) {
       const mid = uid();
       const aid = uid();
