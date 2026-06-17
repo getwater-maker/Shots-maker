@@ -16,7 +16,13 @@ const presetStore = require('../tts/preset-store');
 const { getInstance: getTTS } = require('../tts/tts-manager');
 
 let ffmpegPath = null;
-try { ffmpegPath = require('ffmpeg-static'); } catch {}
+try {
+  ffmpegPath = require('ffmpeg-static');
+  // Electron asar 패키징 시 app.asar 안 경로는 실행 불가 → app.asar.unpacked 로 보정
+  if (ffmpegPath && ffmpegPath.includes('app.asar') && !ffmpegPath.includes('app.asar.unpacked')) {
+    ffmpegPath = ffmpegPath.replace('app.asar', 'app.asar.unpacked');
+  }
+} catch {}
 
 // ── 파싱 ────────────────────────────────────────────────
 function parseScript(scriptPath) {
@@ -106,6 +112,11 @@ function atempoWavToMp3(wavPath, mp3Path, tempo) {
 async function fillTts(project, preset, ttsMgr, workDir, onLine, abortSignal, speedFactor = 1.15) {
   fs.mkdirSync(workDir, { recursive: true });
   const sf = (speedFactor != null && Number(speedFactor) > 0) ? Number(speedFactor) : 1;
+  if (sf !== 1 && (!ffmpegPath || !fs.existsSync(ffmpegPath))) {
+    if (onLine) onLine(`⚠ ffmpeg 사용 불가 — 배속(${sf}x) 미적용, 정속 WAV 로 진행 (경로: ${ffmpegPath || '없음'})`);
+  } else if (sf !== 1 && onLine) {
+    onLine(`🔊 음성 배속 ${sf}x 적용 (atempo MP3)`);
+  }
   for (const s of project.sentences) {
     if (abortSignal && abortSignal()) { if (onLine) onLine('⏹ TTS 중단'); break; }
     const res = await ttsMgr.synthesize(s.text, {

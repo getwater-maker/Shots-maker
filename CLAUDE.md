@@ -33,6 +33,9 @@
   `ttsDurationSec = 원본/배속`. 8초 그룹·.vrew 모두 이 배속 MP3 사용. vrew-builder `_playbackRate` 기본 1.
   capbar '음성배속'(기본 1.15) → ttsBuild/make-all 의 speed → fillTts(speedFactor). 검증: 2.30s→2.04s MP3,
   vrew playbackRate 전부 1.
+  - 🐞 **(v0.1.11) 설치판 배속 미적용 버그**: pipeline.js 의 ffmpeg-static 경로가 asar 보정 없어 패키지 앱에서
+    실행 실패 → atempo 실패 → 정속 WAV 폴백(평상시 속도로 들림). vrew-builder 처럼 `app.asar`→`app.asar.unpacked`
+    보정 추가로 해결. fillTts 시작 시 ffmpeg 사용가능 여부 로그(🔊 적용 / ⚠ 미적용).
 
 ## 줄글(prose) 대본 형식 추가 (2026-06-17, v0.1.8)
 - 신규 3번째 형식: `## 쇼츠 N` 안에 `제목:`(2줄) + `[훅]`/`[본론 심화]`/`[CTA]` 같은 **대괄호 그룹 헤더** + 그 아래 줄들=문장.

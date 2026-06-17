@@ -1,7 +1,7 @@
 {
   "name": "shots-maker",
   "productName": "Shots-maker",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "역사이야기 컷 단위 쇼츠 대본(.md) → 편별 Vrew(.vrew)/MP4 자동 제작 (PrimingFlow 엔진 재활용 클론)",
   "main": "bootstrap.js",
   "scripts": {
