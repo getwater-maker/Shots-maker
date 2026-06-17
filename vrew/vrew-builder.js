@@ -1145,14 +1145,17 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
   if (opts.title && (opts.title.line1 || opts.title.line2)) {
     const tinfo = { line1: opts.title.line1, line2: opts.title.line2, t1Size: opts.title.l1 && opts.title.l1.size, t2Size: opts.title.l2 && opts.title.l2.size };
     const TITLE_BLOCK_H = 0.203; // 도형(=제목블록) 높이
+    const SAFE_TOP_9x16 = 0.05;  // 9:16 꽉찬 미디어: 맨 위 가장자리에서 살짝 내려 안전구역
     let shiftedCount = 0;
     for (const g of groups) {
       const clipIds = groupClips.get(g.id);
       if (!clipIds || !clipIds.length) continue;
       const topY = groupTopY.get(g.id) || 0;
-      // 레터박스(상단띠 > 블록보다 충분히 큼)면 띠 가운데로 내림, 아니면 0
+      // 레터박스(상단띠가 블록보다 충분히 큼)면 띠 가운데로 내림.
+      // 9:16 꽉찬(또는 미디어 없음) 그룹이면 상단 안전구역으로 살짝 내림(가장자리 잘림·묻힘 방지).
       let yShift = 0;
       if (topY > TITLE_BLOCK_H + 0.02) { yShift = (topY - TITLE_BLOCK_H) / 2 - 0.012; if (yShift < 0) yShift = 0; }
+      else if (_aspect === '9:16') { yShift = SAFE_TOP_9x16; }
       if (yShift > 0) shiftedCount++;
       if (opts.titleBg && opts.titleBg.enabled) {
         try { addShapeTrack(pj, opts.titleBg, tinfo, _frameRatio, mediaZip, log, clipIds, yShift); }
