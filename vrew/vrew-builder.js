@@ -791,12 +791,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
     //     (Shots-maker: Grok이 _aspectRatio='9:16'로 세로 영상을 내므로 훅 컷 애니메이션 반영됨)
     if (g.videoPath && fs.existsSync(g.videoPath)) {
       const _vmeta0 = readMp4VideoMeta(g.videoPath);
-      const _vertical = _vmeta0 ? (_vmeta0.height > _vmeta0.width) : false;
-      const _useVideo = (_aspect !== '9:16') || _vertical;
-      if (!_useVideo) {
-        log(`[Vrew] ⚠ G${g.num} 영상 제외 — ${_vmeta0 ? `가로 영상 ${_vmeta0.width}x${_vmeta0.height}` : 'mp4 메타 읽기 실패'} (9:16 캔버스엔 세로 영상 필요). Flow/Grok 을 9:16으로 만들어야 .vrew 에 들어갑니다.`);
-      }
-      if (_useVideo) {
+      { // 영상은 항상 사용 — 캔버스와 비율이 비슷하면 꽉 채우고, 다르면(가로↔9:16 등) 레터박스 가운데(전체 표시)
       const mid = uid();
       const aid = uid();
       const videoTid = sid();
@@ -842,17 +837,29 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       // 1~2픽셀 row 가 흰색 인코딩 artifact 로 남는 케이스 발견 → 사용자가 화면
       // 하단에 얇은 흰 줄을 봤음. 8% 마진으로 늘려서 가장자리 픽셀까지 화면 밖으로
       // 밀어냄 (각 변 4%씩 잘림 — 영상 중앙 콘텐츠는 그대로 보존).
-      const SCALE  = 1.08;
-      const OFFSET = (1 - SCALE) / 2;      // = -0.04 (가운데 정렬)
+      // 비율: 캔버스와 비슷하면 8% 확대 cover(꽉 채움), 다르면(가로영상↔9:16 등) 비율유지 레터박스 가운데(전체 표시).
+      const _vRatio = videoHeight > 0 ? (videoWidth / videoHeight) : _frameRatio;
+      const _vMismatch = Math.abs(_vRatio - _frameRatio) > 0.06;
+      let _vx, _vy, _vw, _vh;
+      if (_vMismatch) {
+        const _scale = Math.min(_canvasW / videoWidth, _canvasH / videoHeight);
+        _vw = (videoWidth * _scale) / _canvasW;
+        _vh = (videoHeight * _scale) / _canvasH;
+        _vx = (1 - _vw) / 2; _vy = (1 - _vh) / 2;       // 가운데
+        log(`[Vrew] G${g.num} 영상 ${videoWidth}x${videoHeight}(비율${_vRatio.toFixed(2)}) — 비율유지 가운데 레터박스(전체 표시)`);
+      } else {
+        const SCALE = 1.08, OFFSET = (1 - SCALE) / 2;   // 8% 확대 cover + 가운데
+        _vx = OFFSET; _vy = OFFSET; _vw = SCALE; _vh = SCALE;
+      }
       pj.props.tracks[videoTid] = {
         trackId: videoTid, mediaId: mid,
-        xPos: OFFSET, yPos: OFFSET, height: SCALE, width: SCALE,
+        xPos: _vx, yPos: _vy, height: _vh, width: _vw,
         rotation: 0, zIndex: groupIdx, type: 'video',
         sourceIn: 0, sourceOut: dur,
-        originalWidthHeightRatio: videoWidth / videoHeight,
+        originalWidthHeightRatio: _vRatio,
         isTrimmable: true, hasAlphaChannel: false,
         editInfo: {},
-        fillType: 'cut',                 // 트랙 직속 (영상.vrew 형식, cover 모드)
+        fillType: 'cut',                 // 트랙 박스가 영상 비율과 동일 → cut 이어도 잘리지 않고 전체 표시
       };
       // 비디오 오디오 트랙 — volume:0 (PrimingFlow TTS 만 들리도록 음소거)
       pj.props.tracks[audioTid] = {
@@ -865,10 +872,10 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       mediaZip.push({ src: g.videoPath, name: fn });
       groupIdx++;
       continue;
-      } // _useVideo (세로 영상이 아니면 아래 이미지 분기로 폴백)
+      }
     }
 
-    // (b) 비디오 없으면(또는 9:16에 가로영상이라 폴백) 기존 이미지 분기
+    // (b) 비디오 없으면 기존 이미지 분기 (이미지도 비율 다르면 가운데 레터박스)
     if (!g.imagePath || !fs.existsSync(g.imagePath)) {
       missingImg.push(g.num ?? g.id);
       continue;
