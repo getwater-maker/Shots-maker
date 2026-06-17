@@ -38,8 +38,33 @@
 
 const fs = require('fs');
 const {
-  Sentence, Group, Project, makeSentenceIder, finalizeGroupIds,
+  Sentence, Group, Project, makeSentenceIder, finalizeGroupIds, countMeaningful,
 } = require('./project-model');
+
+// 한 나레이션 줄/컷을 문장 단위로 분리 (긴 런온 문장이 8초 그룹을 넘기는 것 방지).
+//   1) 마침표·물음표·느낌표(. ? ! 。)로 문장 분리 (종결부호 유지)
+//   2) 그래도 maxChars(유효 글자수) 넘으면 쉼표(,) 절 단위로 그리디 분리
+// 반환: 문장 문자열 배열. (TTS 전에 분리 → 각 문장이 별도 음성으로 합성, 오디오 자르기 불필요)
+function splitNarration(text, maxChars = 28) {
+  const raw = String(text == null ? '' : text).trim();
+  if (!raw) return [];
+  const sentences = raw.match(/[^.!?。]+[.!?。]+|[^.!?。]+$/g) || [raw];
+  const out = [];
+  for (let s of sentences) {
+    s = s.trim();
+    if (!s) continue;
+    if (countMeaningful(s) <= maxChars) { out.push(s); continue; }
+    // 너무 긴 단일 문장 → 쉼표 뒤에서 절 단위로 묶기
+    const parts = s.split(/(?<=,)\s*/);
+    let cur = '';
+    for (const p of parts) {
+      if (cur && countMeaningful(cur + p) > maxChars) { out.push(cur.trim()); cur = p; }
+      else cur += p;
+    }
+    if (cur.trim()) out.push(cur.trim());
+  }
+  return out.length ? out : [raw];
+}
 
 const H2_SHORTS_RE = /^##\s*쇼츠\s*(\d+)\s*(.*)$/;
 const H1_RE = /^#\s+(.*)$/;
@@ -153,11 +178,13 @@ function buildProjectModelGrouped(groupsData) {
     g.motionNote = gd.motionNote || null;
     // 문장이 하나도 없으면 빈 그룹 — 스킵(이미지/영상만 있는 비정상 블록 방지)
     const texts = (gd.sentences && gd.sentences.length) ? gd.sentences : [];
-    for (const text of texts) {
-      const s = new Sentence({ id: sid(text), num: sentences.length + 1, text });
-      s.groupId = g.id;
-      g.sentenceIds.push(s.id);
-      sentences.push(s);
+    for (const rawText of texts) {
+      for (const text of splitNarration(rawText)) { // 런온 줄 → 문장 단위로 분리
+        const s = new Sentence({ id: sid(text), num: sentences.length + 1, text });
+        s.groupId = g.id;
+        g.sentenceIds.push(s.id);
+        sentences.push(s);
+      }
     }
     groups.push(g);
   });
@@ -217,8 +244,7 @@ function buildProjectModel(cuts) {
   const sentences = [];
   const groups = [];
   cuts.forEach((c, i) => {
-    const s = new Sentence({ id: sid(c.narration), num: i + 1, text: c.narration });
-    const g = new Group({ num: i + 1, sentenceIds: [s.id] });
+    const g = new Group({ num: i + 1, sentenceIds: [] });
     g.imagePrompt = c.imagePrompt || null;
     g.videoPrompt = c.videoPrompt || null;
     g.motionNote = c.motionNote || null;
@@ -227,8 +253,13 @@ function buildProjectModel(cuts) {
     // 🎬 비디오 프롬프트가 있거나 훅이면 I2V 그룹으로 표시
     g.isI2V = !!c.videoPrompt || (c.phase === '훅');
     g.mode = g.isI2V ? 'i2v' : 'motion';
-    s.groupId = g.id;
-    sentences.push(s);
+    // 컷 나레이션을 문장 단위로 분리(런온 문장 → 여러 문장). 그룹은 그 문장들을 모두 가짐.
+    for (const text of splitNarration(c.narration)) {
+      const s = new Sentence({ id: sid(text), num: sentences.length + 1, text });
+      s.groupId = g.id;
+      g.sentenceIds.push(s.id);
+      sentences.push(s);
+    }
     groups.push(g);
   });
   finalizeGroupIds(groups, sentences);
